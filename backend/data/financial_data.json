@@ -1,0 +1,328 @@
+{
+  "profile": {
+    "current_balance": 69302.0,
+    "monthly_income": 60000.0,
+    "monthly_expenses": 28500.0,
+    "upcoming_bills": 19999.0,
+    "savings_goal": 200000.0,
+    "current_savings": 124998.0,
+    "planned_purchase": {
+      "item": "Laptop",
+      "amount": 50000.0
+    },
+    "currency": "\u20b9",
+    "user_name": "test",
+    "user_email": "test@gmail.com"
+  },
+  "accounts": [
+    {
+      "id": "acc-1",
+      "name": "HDFC Salary Account",
+      "type": "Bank",
+      "balance": 28802.0,
+      "masked_number": "\u2022\u2022\u2022\u2022 4892"
+    },
+    {
+      "id": "acc-2",
+      "name": "ICICI Emergency Reserve",
+      "type": "Savings",
+      "balance": 35000.0,
+      "masked_number": "\u2022\u2022\u2022\u2022 7710"
+    },
+    {
+      "id": "acc-3",
+      "name": "Physical Cash Wallet",
+      "type": "Cash",
+      "balance": 10000.0,
+      "masked_number": "Cash in Hand"
+    },
+    {
+      "id": "acc-4",
+      "name": "SBI Cashback Credit Card",
+      "type": "Credit Card",
+      "balance": -4500.0,
+      "masked_number": "\u2022\u2022\u2022\u2022 3194"
+    }
+  ],
+  "budgets": [
+    {
+      "id": "b-1",
+      "category": "Food",
+      "amount": 10000.0
+    },
+    {
+      "id": "b-2",
+      "category": "Shopping",
+      "amount": 8000.0
+    },
+    {
+      "id": "b-3",
+      "category": "Transport",
+      "amount": 5000.0
+    },
+    {
+      "id": "b-4",
+      "category": "Entertainment",
+      "amount": 3000.0
+    },
+    {
+      "id": "b-5",
+      "category": "Bills",
+      "amount": 25000.0
+    },
+    {
+      "id": "b-6",
+      "category": "Fuel",
+      "amount": 10000.0
+    }
+  ],
+  "transactions": [
+    {
+      "id": "tx-2",
+      "merchant": "Uber Cabs",
+      "amount": 1200.0,
+      "category": "Transport",
+      "confidence": "high",
+      "date": "2026-09-05",
+      "type": "expense",
+      "account": "HDFC Salary Account",
+      "notes": "Airport trip commute"
+    },
+    {
+      "id": "tx-3",
+      "merchant": "Amazon India",
+      "amount": 4500.0,
+      "category": "Shopping",
+      "confidence": "medium",
+      "date": "2026-09-10",
+      "type": "expense",
+      "account": "SBI Cashback Credit Card",
+      "notes": "Home essentials and mouse"
+    },
+    {
+      "id": "tx-4",
+      "merchant": "Netflix Subscription",
+      "amount": 649.0,
+      "category": "Entertainment",
+      "confidence": "high",
+      "date": "2026-09-12",
+      "type": "expense",
+      "account": "HDFC Salary Account",
+      "notes": "Monthly Premium plan"
+    },
+    {
+      "id": "tx-5",
+      "merchant": "State Electricity Board",
+      "amount": 2500.0,
+      "category": "Bills",
+      "confidence": "high",
+      "date": "2026-09-15",
+      "type": "expense",
+      "account": "HDFC Salary Account",
+      "notes": "Monthly electricity utility"
+    },
+    {
+      "id": "tx-6",
+      "merchant": "College Books & Stationary",
+      "amount": 1500.0,
+      "category": "Shopping",
+      "confidence": "medium",
+      "date": "2026-09-18",
+      "type": "expense",
+      "account": "Physical Cash Wallet",
+      "notes": "AI & Finance course reference books"
+    },
+    {
+      "id": "tx-7",
+      "merchant": "Tech Consulting Monthly Payout",
+      "amount": 60000.0,
+      "category": "Income",
+      "confidence": "high",
+      "date": "2026-09-01",
+      "type": "income",
+      "account": "HDFC Salary Account",
+      "notes": "Consulting retainer salary"
+    },
+    {
+      "id": "tx-8",
+      "merchant": "Zomato Dine-in",
+      "amount": 1850.0,
+      "category": "Food",
+      "confidence": "high",
+      "date": "2026-09-19",
+      "type": "expense",
+      "account": "HDFC Salary Account",
+      "notes": "Weekend dinner with friends"
+    },
+    {
+      "id": "tx-9",
+      "merchant": "Metro Smart Card Recharge",
+      "amount": 1000.0,
+      "category": "Transport",
+      "confidence": "high",
+      "date": "2026-09-08",
+      "type": "expense",
+      "account": "HDFC Salary Account",
+      "notes": "Monthly commute pass"
+    },
+    {
+      "id": "tx-10",
+      "merchant": "Spotify India",
+      "amount": 119.0,
+      "category": "Entertainment",
+      "confidence": "high",
+      "date": "2026-09-14",
+      "type": "expense",
+      "account": "HDFC Salary Account",
+      "notes": "Individual monthly music stream"
+    }
+  ],
+  "bills": [
+    {
+      "id": "bill-1",
+      "name": "Apartment Rent",
+      "amount": 15000.0,
+      "due_date": "2026-10-01",
+      "recurring": true,
+      "status": "unpaid"
+    },
+    {
+      "id": "bill-2",
+      "name": "Electricity Bill",
+      "amount": 2500.0,
+      "due_date": "2026-09-28",
+      "recurring": true,
+      "status": "unpaid"
+    },
+    {
+      "id": "bill-3",
+      "name": "Broadband Internet (Airtel Fiber)",
+      "amount": 1500.0,
+      "due_date": "2026-09-29",
+      "recurring": true,
+      "status": "unpaid"
+    },
+    {
+      "id": "bill-4",
+      "name": "Mobile Postpaid",
+      "amount": 999.0,
+      "due_date": "2026-10-05",
+      "recurring": true,
+      "status": "unpaid"
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": "sub-1",
+      "name": "Netflix Premium",
+      "amount": 649.0,
+      "frequency": "monthly",
+      "next_date": "2026-10-12",
+      "status": "active"
+    },
+    {
+      "id": "sub-2",
+      "name": "Spotify Premium",
+      "amount": 119.0,
+      "frequency": "monthly",
+      "next_date": "2026-10-14",
+      "status": "active"
+    },
+    {
+      "id": "sub-3",
+      "name": "Amazon Prime Annual",
+      "amount": 1499.0,
+      "frequency": "yearly",
+      "next_date": "2027-04-10",
+      "status": "active"
+    },
+    {
+      "id": "sub-4",
+      "name": "Gym & Fitness Membership",
+      "amount": 2000.0,
+      "frequency": "monthly",
+      "next_date": "2026-10-01",
+      "status": "active"
+    }
+  ],
+  "goals": [
+    {
+      "id": "goal-1",
+      "name": "6-Month Emergency Fund",
+      "target_amount": 200000.0,
+      "current_amount": 80000.0,
+      "target_date": "2027-03-31",
+      "monthly_contribution": 15000.0
+    },
+    {
+      "id": "goal-3",
+      "name": "Year-End Travel & Vacation",
+      "target_amount": 40000.0,
+      "current_amount": 15000.0,
+      "target_date": "2026-12-25",
+      "monthly_contribution": 5000.0
+    }
+  ],
+  "alerts": [
+    {
+      "id": "al-1",
+      "level": "warning",
+      "title": "Shopping Budget at 75%",
+      "message": "You have spent \u20b96,000 of your \u20b98,000 Shopping budget for this month.",
+      "status": "new",
+      "timestamp": "2026-09-20T10:30:00Z"
+    },
+    {
+      "id": "al-2",
+      "level": "info",
+      "title": "Upcoming Bills Due Soon",
+      "message": "\u20b919,999 in total upcoming bills due within the next 14 days.",
+      "status": "new",
+      "timestamp": "2026-09-21T08:15:00Z"
+    },
+    {
+      "id": "al-3",
+      "level": "attention",
+      "title": "Planned Purchase Feasibility",
+      "message": "Purchasing the \u20b950,000 Laptop leaves comfortable liquidity, but requires reserving \u20b919,999 for bills first.",
+      "status": "new",
+      "timestamp": "2026-09-21T09:00:00Z"
+    }
+  ],
+  "pending_action": null,
+  "action_history": [
+    {
+      "type": "reserve_bill_funds",
+      "status": "executed_mock",
+      "amount": 5000.0,
+      "description": "Mock reservation of \u20b95,000 for utility bills",
+      "previous_balance": 125000.0,
+      "new_balance": 120000.0,
+      "timestamp": "2026-09-15T14:22:00Z"
+    },
+    {
+      "type": "reserve_bill_funds",
+      "status": "executed_mock",
+      "amount": 5000.0,
+      "description": "Verification test fund reservation",
+      "previous_balance": 114300.0,
+      "new_balance": 109300.0
+    },
+    {
+      "type": "reserve_bill_funds",
+      "status": "executed_mock",
+      "amount": 19999.0,
+      "description": "Reserve \u20b919,999 from main balance to safeguard upcoming expenses.",
+      "previous_balance": 109300.0,
+      "new_balance": 89301.0
+    },
+    {
+      "type": "reserve_bill_funds",
+      "status": "executed_mock",
+      "amount": 19999.0,
+      "description": "Reserve \u20b919,999 from main balance to safeguard upcoming expenses.",
+      "previous_balance": 89301.0,
+      "new_balance": 69302.0
+    }
+  ]
+}

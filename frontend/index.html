@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Financial Buddy — AI Personal Finance Assistant</title>
+  <meta name="description" content="AI-powered personal finance assistant built around Microsoft Azure AI Foundry with 3-agent intelligence and human-in-the-loop control.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=setup-fix-1">
+  <!-- Chart.js for responsive interactive financial charts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body class="fintech-theme">
+
+  <!-- ============================================================== -->
+  <!-- 1. AUTHENTICATION OVERLAY / SCREEN (Login & Signup)           -->
+  <!-- ============================================================== -->
+  <div id="auth-screen" class="auth-screen hidden">
+    <div class="auth-container">
+      <div class="auth-brand">
+        <div class="brand-badge">
+          <span class="brand-symbol">₹</span>
+        </div>
+        <h1 class="auth-title">Financial Buddy</h1>
+        <p class="auth-subtitle">AI-Powered Financial Intelligence • Azure AI Foundry</p>
+      </div>
+
+      <!-- Auth Card Container -->
+      <div class="auth-card">
+        <!-- Auth Tabs Toggle -->
+        <div class="auth-tabs">
+          <button type="button" id="tab-login" class="auth-tab active" onclick="switchAuthTab('login')">Sign In</button>
+          <button type="button" id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">Create Account</button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="form-login" class="auth-form" onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="login-email">Email Address</label>
+            <input type="email" id="login-email" placeholder="name@example.com" value="demo@financialbuddy.ai" required>
+          </div>
+          <div class="form-group">
+            <div class="label-row">
+              <label for="login-password">Password</label>
+              <a href="#" class="forgot-pwd-link" onclick="openForgotPwdModal(event)">Forgot password?</a>
+            </div>
+            <input type="password" id="login-password" placeholder="••••••••" value="demo1234" required>
+          </div>
+          <div class="form-row-checkbox">
+            <label class="checkbox-label">
+              <input type="checkbox" id="login-remember" checked>
+              <span>Remember me on this device</span>
+            </label>
+          </div>
+          <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">
+            <span>Sign In to Financial Buddy</span>
+          </button>
+          <div class="auth-divider"><span>OR DEMO ACCESS</span></div>
+          <button type="button" class="btn btn-demo btn-block" onclick="handleQuickDemoLogin()">
+            <span>⚡ Instant 1-Click Demo Login</span>
+          </button>
+        </form>
+
+        <!-- Signup Form -->
+        <form id="form-signup" class="auth-form hidden" onsubmit="handleSignup(event)">
+          <div class="form-group">
+            <label for="signup-name">Full Name *</label>
+            <input type="text" id="signup-name" placeholder="e.g. Alex Morgan" required>
+          </div>
+          <div class="form-group">
+            <label for="signup-email">Email Address *</label>
+            <input type="email" id="signup-email" placeholder="name@example.com" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="signup-password">Password *</label>
+              <input type="password" id="signup-password" placeholder="At least 6 characters" minlength="6" required>
+            </div>
+            <div class="form-group">
+              <label for="signup-confirm-password">Confirm Password *</label>
+              <input type="password" id="signup-confirm-password" placeholder="Re-enter password" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="signup-income">Monthly Income (Optional)</label>
+              <input type="number" id="signup-income" placeholder="e.g. 60000" min="0">
+            </div>
+            <div class="form-group">
+              <label for="signup-goal">Primary Goal (Optional)</label>
+              <select id="signup-goal">
+                <option value="Emergency Fund">Emergency Fund</option>
+                <option value="Laptop / Device">Laptop / Tech Purchase</option>
+                <option value="Vacation & Travel">Travel & Vacation</option>
+                <option value="Education">Education / Courses</option>
+                <option value="General Wealth">General Savings</option>
+              </select>
+            </div>
+          </div>
+          <div id="signup-error-msg" class="form-error hidden"></div>
+          <button type="submit" id="btn-signup-submit" class="btn btn-primary btn-block">
+            <span>Create Free Account</span>
+          </button>
+        </form>
+      </div>
+
+      <div class="auth-footer">
+        <p>🔒 Simulated Banking Environment. No real bank credentials or PINs are ever requested.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- 2. MAIN APPLICATION SHELL                                      -->
+  <!-- ============================================================== -->
+  <div id="app-shell" class="app-shell">
+    
+    <!-- Collapsible Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-logo">₹</div>
+          <div class="brand-text">
+            <h2>Financial Buddy</h2>
+            <span class="brand-tag">Azure AI Foundry</span>
+          </div>
+        </div>
+        <button id="sidebar-close-btn" class="sidebar-toggle-btn mobile-only" onclick="toggleSidebar()">✕</button>
+      </div>
+
+      <!-- Navigation Menu -->
+      <nav class="sidebar-nav">
+        <div class="nav-section-title">CORE FINANCIALS</div>
+        <a href="#dashboard" class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+          <span class="nav-icon">📊</span>
+          <span class="nav-label">Dashboard</span>
+        </a>
+        <a href="#transactions" class="nav-item" data-page="transactions" onclick="navigate('transactions')">
+          <span class="nav-icon">💳</span>
+          <span class="nav-label">Transactions</span>
+        </a>
+        <a href="#budgets" class="nav-item" data-page="budgets" onclick="navigate('budgets')">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-label">Budgets</span>
+        </a>
+        <a href="#bills" class="nav-item" data-page="bills" onclick="navigate('bills')">
+          <span class="nav-icon">📅</span>
+          <span class="nav-label">Bills & Subscriptions</span>
+        </a>
+        <a href="#goals" class="nav-item" data-page="goals" onclick="navigate('goals')">
+          <span class="nav-icon">🏆</span>
+          <span class="nav-label">Goals</span>
+        </a>
+        <a href="#accounts" class="nav-item" data-page="accounts" onclick="navigate('accounts')">
+          <span class="nav-icon">🏦</span>
+          <span class="nav-label">Accounts</span>
+        </a>
+
+        <div class="nav-section-title">AI & INTELLIGENCE</div>
+        <a href="#ai" class="nav-item" data-page="ai" onclick="navigate('ai')">
+          <span class="nav-icon">🤖</span>
+          <span class="nav-label">AI Assistant</span>
+          <span class="nav-badge">3 Agents</span>
+        </a>
+        <a href="#alerts" class="nav-item" data-page="alerts" onclick="navigate('alerts')">
+          <span class="nav-icon">🔔</span>
+          <span class="nav-label">Alerts & Actions</span>
+          <span id="sidebar-alert-badge" class="nav-badge badge-warning">3</span>
+        </a>
+
+        <div class="nav-section-title">MANAGEMENT</div>
+        <a href="#setup" class="nav-item" data-page="setup" onclick="navigate('setup')">
+          <span class="nav-icon">📝</span>
+          <span class="nav-label">Setup / Add Data</span>
+        </a>
+        <a href="#settings" class="nav-item" data-page="settings" onclick="navigate('settings')">
+          <span class="nav-icon">⚙️</span>
+          <span class="nav-label">Settings & Profile</span>
+        </a>
+      </nav>
+
+      <!-- Sidebar Footer (User Card & Quick Info) -->
+      <div class="sidebar-footer">
+        <div class="user-card" onclick="navigate('settings')">
+          <div class="user-avatar" id="sidebar-user-avatar">DU</div>
+          <div class="user-info">
+            <span class="user-name" id="sidebar-user-name">Demo User</span>
+            <span class="user-role" id="sidebar-user-email">demo@financialbuddy.ai</span>
+          </div>
+        </div>
+        <button class="btn-logout" title="Sign Out" onclick="handleLogout()">
+          <span>⏻</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- App Main Area -->
+    <div class="app-main">
+      
+      <!-- Top Header -->
+      <header class="top-header">
+        <div class="header-left">
+          <button id="sidebar-toggle-btn" class="header-icon-btn mobile-only" onclick="toggleSidebar()">
+            <span>☰</span>
+          </button>
+          <div class="page-title-group">
+            <h1 id="page-title">Financial Dashboard</h1>
+            <p id="page-subtitle" class="page-subtitle">Real-time overview of your factual financial situation and AI insights</p>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <!-- Backend & Foundry Status Pill -->
+          <div id="backend-status-pill" class="status-pill status-connecting" title="Checking Azure AI Foundry connection...">
+            <span class="status-dot"></span>
+            <span id="backend-status-text">Foundry Ready</span>
+          </div>
+
+          <!-- Quick Add Transaction Action -->
+          <button class="btn btn-outline btn-sm" onclick="openAddTxModal()">
+            <span class="btn-icon">➕</span>
+            <span class="desktop-only">Add Transaction</span>
+          </button>
+
+          <!-- Run Full AI Workflow Button -->
+          <button id="btn-run-workflow" class="btn btn-primary btn-sm" onclick="triggerRunWorkflow()">
+            <span class="btn-icon">⚡</span>
+            <span>Run AI Workflow</span>
+          </button>
+
+          <!-- Alerts Notification Icon -->
+          <button class="header-icon-btn notification-btn" title="Alerts & Actions" onclick="navigate('alerts')">
+            <span>🔔</span>
+            <span id="header-alert-badge" class="badge-dot"></span>
+          </button>
+
+          <!-- User Menu Trigger -->
+          <div class="user-menu-trigger" onclick="navigate('settings')">
+            <div class="user-avatar-sm" id="header-user-avatar">DU</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Dynamic Page Container (Views injected by app.js) -->
+      <main id="page-container" class="page-container">
+        <!-- Rendered view content appears here -->
+      </main>
+
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- 3. MODALS & DRAWERS CONTAINER                                  -->
+  <!-- ============================================================== -->
+
+  <!-- Modal: Add / Edit Transaction -->
+  <div id="modal-tx" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-tx')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-tx-title">➕ Add Transaction</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-tx')">✕</button>
+      </div>
+      <form id="form-modal-tx" class="modal-form" onsubmit="handleSaveTransaction(event)">
+        <input type="hidden" id="tx-edit-id">
+        <div class="form-group">
+          <label for="tx-form-merchant">Merchant / Description *</label>
+          <input type="text" id="tx-form-merchant" placeholder="e.g. Swiggy, Amazon, Uber, Salary" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tx-form-amount">Amount (₹) *</label>
+            <input type="number" id="tx-form-amount" min="1" step="any" placeholder="e.g. 1500" required>
+          </div>
+          <div class="form-group">
+            <label for="tx-form-type">Type *</label>
+            <select id="tx-form-type" required>
+              <option value="expense">Expense (Outflow)</option>
+              <option value="income">Income (Inflow)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tx-form-category">Category</label>
+            <select id="tx-form-category">
+              <option value="Food">Food & Dining</option>
+              <option value="Shopping">Shopping</option>
+              <option value="Transport">Transportation</option>
+              <option value="Entertainment">Entertainment</option>
+              <option value="Bills">Bills & Utilities</option>
+              <option value="Healthcare">Healthcare</option>
+              <option value="Education">Education</option>
+              <option value="Income">Income / Retainer</option>
+              <option value="Other">Other Discretionary</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tx-form-account">Account</label>
+            <select id="tx-form-account">
+              <!-- Dynamically populated from accounts -->
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tx-form-date">Date</label>
+            <input type="date" id="tx-form-date" required>
+          </div>
+          <div class="form-group">
+            <label for="tx-form-notes">Notes (Optional)</label>
+            <input type="text" id="tx-form-notes" placeholder="e.g. Team lunch, Books for research">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-tx')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Transaction</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Budget -->
+  <div id="modal-budget" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-budget')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-budget-title">🎯 Create Monthly Budget</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-budget')">✕</button>
+      </div>
+      <form id="form-modal-budget" class="modal-form" onsubmit="handleSaveBudget(event)">
+        <input type="hidden" id="budget-edit-id">
+        <div class="form-group">
+          <label for="budget-form-category">Category Name *</label>
+          <input type="text" id="budget-form-category" placeholder="e.g. Food, Shopping, Transport, Travel" required>
+        </div>
+        <div class="form-group">
+          <label for="budget-form-amount">Monthly Limit (₹) *</label>
+          <input type="number" id="budget-form-amount" min="100" step="any" placeholder="e.g. 10000" required>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-budget')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Budget</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Bill -->
+  <div id="modal-bill" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-bill')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-bill-title">📅 Add Upcoming Bill</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-bill')">✕</button>
+      </div>
+      <form id="form-modal-bill" class="modal-form" onsubmit="handleSaveBill(event)">
+        <input type="hidden" id="bill-edit-id">
+        <div class="form-group">
+          <label for="bill-form-name">Bill Name *</label>
+          <input type="text" id="bill-form-name" placeholder="e.g. Apartment Rent, Electricity, Internet" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="bill-form-amount">Amount (₹) *</label>
+            <input type="number" id="bill-form-amount" min="1" step="any" placeholder="e.g. 15000" required>
+          </div>
+          <div class="form-group">
+            <label for="bill-form-due-date">Due Date *</label>
+            <input type="date" id="bill-form-due-date" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="bill-form-status">Status</label>
+            <select id="bill-form-status">
+              <option value="unpaid">Unpaid / Due Soon</option>
+              <option value="paid">Paid</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </div>
+          <div class="form-group" style="display:flex; align-items:center; padding-top:24px;">
+            <label class="checkbox-label">
+              <input type="checkbox" id="bill-form-recurring" checked>
+              <span>Monthly Recurring</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-bill')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Bill</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Subscription -->
+  <div id="modal-sub" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-sub')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-sub-title">🔁 Add Subscription</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-sub')">✕</button>
+      </div>
+      <form id="form-modal-sub" class="modal-form" onsubmit="handleSaveSubscription(event)">
+        <input type="hidden" id="sub-edit-id">
+        <div class="form-group">
+          <label for="sub-form-name">Service / Subscription Name *</label>
+          <input type="text" id="sub-form-name" placeholder="e.g. Netflix, Spotify, Prime, Gym" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sub-form-amount">Amount (₹) *</label>
+            <input type="number" id="sub-form-amount" min="1" step="any" placeholder="e.g. 649" required>
+          </div>
+          <div class="form-group">
+            <label for="sub-form-frequency">Billing Cycle *</label>
+            <select id="sub-form-frequency">
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly / Annual</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="sub-form-next-date">Next Billing Date</label>
+          <input type="date" id="sub-form-next-date">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-sub')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Subscription</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Goal -->
+  <div id="modal-goal" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-goal')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-goal-title">🏆 Create Financial Goal</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-goal')">✕</button>
+      </div>
+      <form id="form-modal-goal" class="modal-form" onsubmit="handleSaveGoal(event)">
+        <input type="hidden" id="goal-edit-id">
+        <div class="form-group">
+          <label for="goal-form-name">Goal Name *</label>
+          <input type="text" id="goal-form-name" placeholder="e.g. Emergency Fund, M4 Laptop, Europe Trip" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="goal-form-target">Target Amount (₹) *</label>
+            <input type="number" id="goal-form-target" min="1000" step="any" placeholder="e.g. 200000" required>
+          </div>
+          <div class="form-group">
+            <label for="goal-form-current">Currently Saved (₹)</label>
+            <input type="number" id="goal-form-current" min="0" step="any" placeholder="e.g. 80000" value="0">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="goal-form-date">Target Date</label>
+            <input type="date" id="goal-form-date">
+          </div>
+          <div class="form-group">
+            <label for="goal-form-contribution">Monthly Contribution (₹)</label>
+            <input type="number" id="goal-form-contribution" min="0" step="any" placeholder="e.g. 15000">
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-goal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Goal</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Add / Edit Account -->
+  <div id="modal-account" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-account')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-account-title">🏦 Add Financial Account</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-account')">✕</button>
+      </div>
+      <form id="form-modal-account" class="modal-form" onsubmit="handleSaveAccount(event)">
+        <input type="hidden" id="account-edit-id">
+        <div class="form-group">
+          <label for="acc-form-name">Account Name *</label>
+          <input type="text" id="acc-form-name" placeholder="e.g. HDFC Salary Account, ICICI Emergency, Cash" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="acc-form-type">Account Type *</label>
+            <select id="acc-form-type">
+              <option value="Bank">Checking / Salary Account</option>
+              <option value="Savings">Savings Account</option>
+              <option value="Cash">Physical Cash</option>
+              <option value="Credit Card">Credit Card</option>
+              <option value="Investment">Investment / Mutual Fund</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="acc-form-balance">Current Balance (₹) *</label>
+            <input type="number" id="acc-form-balance" step="any" placeholder="e.g. 75000" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="acc-form-mask">Masked Identifier (Optional)</label>
+          <input type="text" id="acc-form-mask" placeholder="e.g. •••• 4892 (No real card/account numbers)">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('modal-account')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Simulated Action Confirmation (Agent 3) -->
+  <div id="modal-action-confirm" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-action-confirm')">
+    <div class="modal-card modal-action-card">
+      <div class="action-modal-header">
+        <div class="action-shield-icon">🛡️</div>
+        <div>
+          <span class="badge badge-accent">Human Confirmation Required</span>
+          <h3 id="modal-action-title">Simulated Financial Action</h3>
+        </div>
+      </div>
+      <div class="action-modal-body">
+        <p id="modal-action-description" class="action-modal-desc">Agent 3 has prepared a simulated reserve action to safeguard your upcoming obligations.</p>
+        <div class="action-details-box">
+          <div class="action-detail-row">
+            <span>Action Type:</span>
+            <strong id="modal-action-type">reserve_bill_funds</strong>
+          </div>
+          <div class="action-detail-row">
+            <span>Amount:</span>
+            <strong id="modal-action-amount" class="text-accent">₹19,999.00</strong>
+          </div>
+          <div class="action-detail-row">
+            <span>Impact:</span>
+            <span class="text-muted">Simulates reserving liquid balance into savings/bill buffer. No real bank transfer occurs.</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="handleExecuteActionDecision(false)">✗ Cancel & Dismiss</button>
+        <button type="button" class="btn btn-success" onclick="handleExecuteActionDecision(true)">✓ Confirm Simulated Action</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Forgot Password (UI prototype) -->
+  <div id="modal-forgot-pwd" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-forgot-pwd')">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Reset Password</h3>
+        <button class="modal-close-btn" onclick="closeModal('modal-forgot-pwd')">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 16px 0;">
+        <p class="text-secondary" style="margin-bottom: 16px;">In this prototype, you can sign in directly using the <strong>Instant 1-Click Demo Login</strong> button or enter any email and password on the Sign In screen.</p>
+        <button type="button" class="btn btn-primary btn-block" onclick="closeModal('modal-forgot-pwd'); handleQuickDemoLogin();">Sign in as Demo User</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- 4. TOAST NOTIFICATIONS CONTAINER                               -->
+  <!-- ============================================================== -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Application Controller Scripts -->
+  <script src="app.js?v=setup-fix-1"></script>
+</body>
+</html>
