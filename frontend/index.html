@@ -3,43 +3,45 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Financial Buddy — AI Personal Finance Assistant</title>
-  <meta name="description" content="AI-powered personal finance assistant built around Microsoft Azure AI Foundry with 3-agent intelligence and human-in-the-loop control.">
+  <title>Money Arnold — AI Personal Finance Assistant</title>
+  <meta name="description" content="AI-powered personal finance assistant built around Microsoft Azure AI Foundry with 4-agent intelligence and human-in-the-loop control.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=setup-fix-1">
+  <link rel="stylesheet" href="style.css?v=setup-fix-2">
   <!-- Chart.js for responsive interactive financial charts -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="fintech-theme">
+  <!-- Accessibility Skip Link -->
+  <a href="#page-container" class="skip-link">Skip to main content</a>
 
   <!-- ============================================================== -->
   <!-- 1. AUTHENTICATION OVERLAY / SCREEN (Login & Signup)           -->
   <!-- ============================================================== -->
-  <div id="auth-screen" class="auth-screen hidden">
+  <div id="auth-screen" class="auth-screen hidden" role="region" aria-label="User Authentication">
     <div class="auth-container">
       <div class="auth-brand">
-        <div class="brand-badge">
+        <div class="brand-badge" aria-hidden="true">
           <span class="brand-symbol">₹</span>
         </div>
-        <h1 class="auth-title">Financial Buddy</h1>
-        <p class="auth-subtitle">AI-Powered Financial Intelligence • Azure AI Foundry</p>
+        <h1 class="auth-title">Money Arnold</h1>
+        <p class="auth-subtitle">AI-Powered Financial Intelligence</p>
       </div>
 
       <!-- Auth Card Container -->
       <div class="auth-card">
         <!-- Auth Tabs Toggle -->
-        <div class="auth-tabs">
-          <button type="button" id="tab-login" class="auth-tab active" onclick="switchAuthTab('login')">Sign In</button>
-          <button type="button" id="tab-signup" class="auth-tab" onclick="switchAuthTab('signup')">Create Account</button>
+        <div class="auth-tabs" role="tablist">
+          <button type="button" id="tab-login" class="auth-tab active" role="tab" aria-selected="true" onclick="switchAuthTab('login')">Sign In</button>
+          <button type="button" id="tab-signup" class="auth-tab" role="tab" aria-selected="false" onclick="switchAuthTab('signup')">Create Account</button>
         </div>
 
         <!-- Login Form -->
         <form id="form-login" class="auth-form" onsubmit="handleLogin(event)">
           <div class="form-group">
             <label for="login-email">Email Address</label>
-            <input type="email" id="login-email" placeholder="name@example.com" value="demo@financialbuddy.ai" required>
+            <input type="email" id="login-email" placeholder="name@example.com" value="demo@gmail.com" required>
           </div>
           <div class="form-group">
             <div class="label-row">
@@ -48,6 +50,10 @@
             </div>
             <input type="password" id="login-password" placeholder="••••••••" value="demo1234" required>
           </div>
+          <!-- <div style="background:rgba(56, 189, 248, 0.08); border:1px solid rgba(56, 189, 248, 0.25); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:12px; color:var(--text-secondary);">
+            💡 <strong>Demo Credentials:</strong><br>
+            Gmail: <code style="color:var(--accent); font-weight:700;">demo@gmail.com</code> | Password: <code style="color:var(--accent); font-weight:700;">demo1234</code>
+          </div> -->
           <div class="form-row-checkbox">
             <label class="checkbox-label">
               <input type="checkbox" id="login-remember" checked>
@@ -55,11 +61,11 @@
             </label>
           </div>
           <button type="submit" id="btn-login-submit" class="btn btn-primary btn-block">
-            <span>Sign In to Financial Buddy</span>
+            <span>Sign In to Money Arnold</span>
           </button>
           <div class="auth-divider"><span>OR DEMO ACCESS</span></div>
           <button type="button" class="btn btn-demo btn-block" onclick="handleQuickDemoLogin()">
-            <span>⚡ Instant 1-Click Demo Login</span>
+            <span>⚡ Instant 1-Click Demo Login (demo@gmail.com)</span>
           </button>
         </form>
 
@@ -85,7 +91,7 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label for="signup-income">Monthly Income (Optional)</label>
+              <label for="signup-income">Monthly Income (Optional, defaults to 0)</label>
               <input type="number" id="signup-income" placeholder="e.g. 60000" min="0">
             </div>
             <div class="form-group">
@@ -99,7 +105,7 @@
               </select>
             </div>
           </div>
-          <div id="signup-error-msg" class="form-error hidden"></div>
+          <div id="signup-error-msg" class="form-error hidden" role="alert"></div>
           <button type="submit" id="btn-signup-submit" class="btn btn-primary btn-block">
             <span>Create Free Account</span>
           </button>
@@ -118,80 +124,79 @@
   <div id="app-shell" class="app-shell">
     
     <!-- Collapsible Sidebar -->
-    <aside id="sidebar" class="sidebar">
+    <aside id="sidebar" class="sidebar" aria-label="Sidebar Navigation">
       <div class="sidebar-header">
         <div class="brand">
-          <div class="brand-logo">₹</div>
+          <div class="brand-logo" aria-hidden="true">₹</div>
           <div class="brand-text">
-            <h2>Financial Buddy</h2>
-            <span class="brand-tag">Azure AI Foundry</span>
+            <h2>Money Arnold</h2>
+            <!-- <span class="brand-tag">Azure AI Foundry</span> -->
           </div>
         </div>
-        <button id="sidebar-close-btn" class="sidebar-toggle-btn mobile-only" onclick="toggleSidebar()">✕</button>
+        <button id="sidebar-close-btn" class="sidebar-toggle-btn mobile-only" aria-label="Close navigation sidebar" onclick="toggleSidebar()">✕</button>
       </div>
 
       <!-- Navigation Menu -->
-      <nav class="sidebar-nav">
+      <nav class="sidebar-nav" aria-label="Main Navigation">
         <div class="nav-section-title">CORE FINANCIALS</div>
         <a href="#dashboard" class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
-          <span class="nav-icon">📊</span>
+          <span class="nav-icon" aria-hidden="true">📊</span>
           <span class="nav-label">Dashboard</span>
         </a>
         <a href="#transactions" class="nav-item" data-page="transactions" onclick="navigate('transactions')">
-          <span class="nav-icon">💳</span>
+          <span class="nav-icon" aria-hidden="true">💳</span>
           <span class="nav-label">Transactions</span>
         </a>
         <a href="#budgets" class="nav-item" data-page="budgets" onclick="navigate('budgets')">
-          <span class="nav-icon">🎯</span>
+          <span class="nav-icon" aria-hidden="true">🎯</span>
           <span class="nav-label">Budgets</span>
         </a>
         <a href="#bills" class="nav-item" data-page="bills" onclick="navigate('bills')">
-          <span class="nav-icon">📅</span>
+          <span class="nav-icon" aria-hidden="true">📅</span>
           <span class="nav-label">Bills & Subscriptions</span>
         </a>
         <a href="#goals" class="nav-item" data-page="goals" onclick="navigate('goals')">
-          <span class="nav-icon">🏆</span>
+          <span class="nav-icon" aria-hidden="true">🏆</span>
           <span class="nav-label">Goals</span>
         </a>
         <a href="#accounts" class="nav-item" data-page="accounts" onclick="navigate('accounts')">
-          <span class="nav-icon">🏦</span>
+          <span class="nav-icon" aria-hidden="true">🏦</span>
           <span class="nav-label">Accounts</span>
         </a>
 
         <div class="nav-section-title">AI & INTELLIGENCE</div>
         <a href="#ai" class="nav-item" data-page="ai" onclick="navigate('ai')">
-          <span class="nav-icon">🤖</span>
+          <span class="nav-icon" aria-hidden="true">🤖</span>
           <span class="nav-label">AI Assistant</span>
-          <span class="nav-badge">3 Agents</span>
         </a>
         <a href="#alerts" class="nav-item" data-page="alerts" onclick="navigate('alerts')">
-          <span class="nav-icon">🔔</span>
+          <span class="nav-icon" aria-hidden="true">🔔</span>
           <span class="nav-label">Alerts & Actions</span>
           <span id="sidebar-alert-badge" class="nav-badge badge-warning">3</span>
         </a>
 
         <div class="nav-section-title">MANAGEMENT</div>
         <a href="#setup" class="nav-item" data-page="setup" onclick="navigate('setup')">
-          <span class="nav-icon">📝</span>
+          <span class="nav-icon" aria-hidden="true">📝</span>
           <span class="nav-label">Setup / Add Data</span>
         </a>
         <a href="#settings" class="nav-item" data-page="settings" onclick="navigate('settings')">
-          <span class="nav-icon">⚙️</span>
+          <span class="nav-icon" aria-hidden="true">⚙️</span>
           <span class="nav-label">Settings & Profile</span>
         </a>
       </nav>
 
       <!-- Sidebar Footer (User Card & Quick Info) -->
       <div class="sidebar-footer">
-        <div class="user-card" onclick="navigate('settings')">
-          <div class="user-avatar" id="sidebar-user-avatar">DU</div>
+        <div class="user-card" tabindex="0" role="button" aria-label="View user settings" onclick="navigate('settings')">
+          <div class="user-avatar" id="sidebar-user-avatar" aria-hidden="true">DU</div>
           <div class="user-info">
             <span class="user-name" id="sidebar-user-name">Demo User</span>
             <span class="user-role" id="sidebar-user-email">demo@financialbuddy.ai</span>
           </div>
         </div>
-        <button class="btn-logout" title="Sign Out" onclick="handleLogout()">
-          <span>⏻</span>
+        <button class="btn-logout" title="Sign Out" aria-label="Sign Out of Money Arnold" onclick="handleLogout()">
+          <span aria-hidden="true">⏻</span>
         </button>
       </div>
     </aside>
@@ -200,10 +205,10 @@
     <div class="app-main">
       
       <!-- Top Header -->
-      <header class="top-header">
+      <header class="top-header" role="banner">
         <div class="header-left">
-          <button id="sidebar-toggle-btn" class="header-icon-btn mobile-only" onclick="toggleSidebar()">
-            <span>☰</span>
+          <button id="sidebar-toggle-btn" class="header-icon-btn mobile-only" aria-label="Open navigation sidebar" onclick="toggleSidebar()">
+            <span aria-hidden="true">☰</span>
           </button>
           <div class="page-title-group">
             <h1 id="page-title">Financial Dashboard</h1>
@@ -213,38 +218,38 @@
 
         <div class="header-right">
           <!-- Backend & Foundry Status Pill -->
-          <div id="backend-status-pill" class="status-pill status-connecting" title="Checking Azure AI Foundry connection...">
-            <span class="status-dot"></span>
+          <div id="backend-status-pill" class="status-pill status-connecting" role="status" aria-live="polite" title="Checking Azure AI Foundry connection...">
+            <span class="status-dot" aria-hidden="true"></span>
             <span id="backend-status-text">Foundry Ready</span>
           </div>
 
           <!-- Quick Add Transaction Action -->
-          <button class="btn btn-outline btn-sm" onclick="openAddTxModal()">
-            <span class="btn-icon">➕</span>
+          <button class="btn btn-outline btn-sm" aria-label="Add a new transaction" onclick="openAddTxModal()">
+            <span class="btn-icon" aria-hidden="true">➕</span>
             <span class="desktop-only">Add Transaction</span>
           </button>
 
           <!-- Run Full AI Workflow Button -->
-          <button id="btn-run-workflow" class="btn btn-primary btn-sm" onclick="triggerRunWorkflow()">
-            <span class="btn-icon">⚡</span>
+          <button id="btn-run-workflow" class="btn btn-primary btn-sm" aria-label="Run AI Workflow across all 4 agents" onclick="triggerRunWorkflow()">
+            <span class="btn-icon" aria-hidden="true">⚡</span>
             <span>Run AI Workflow</span>
           </button>
 
           <!-- Alerts Notification Icon -->
-          <button class="header-icon-btn notification-btn" title="Alerts & Actions" onclick="navigate('alerts')">
-            <span>🔔</span>
-            <span id="header-alert-badge" class="badge-dot"></span>
+          <button class="header-icon-btn notification-btn" title="Alerts & Actions" aria-label="View alerts and required actions" onclick="navigate('alerts')">
+            <span aria-hidden="true">🔔</span>
+            <span id="header-alert-badge" class="badge-dot" aria-hidden="true"></span>
           </button>
 
           <!-- User Menu Trigger -->
-          <div class="user-menu-trigger" onclick="navigate('settings')">
-            <div class="user-avatar-sm" id="header-user-avatar">DU</div>
+          <div class="user-menu-trigger" tabindex="0" role="button" aria-label="User profile settings" onclick="navigate('settings')">
+            <div class="user-avatar-sm" id="header-user-avatar" aria-hidden="true">DU</div>
           </div>
         </div>
       </header>
 
       <!-- Dynamic Page Container (Views injected by app.js) -->
-      <main id="page-container" class="page-container">
+      <main id="page-container" class="page-container" tabindex="-1" role="main">
         <!-- Rendered view content appears here -->
       </main>
 
@@ -256,11 +261,11 @@
   <!-- ============================================================== -->
 
   <!-- Modal: Add / Edit Transaction -->
-  <div id="modal-tx" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-tx')">
+  <div id="modal-tx" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-tx-title" onclick="handleModalOverlayClick(event, 'modal-tx')">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-tx-title">➕ Add Transaction</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-tx')">✕</button>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-tx')">✕</button>
       </div>
       <form id="form-modal-tx" class="modal-form" onsubmit="handleSaveTransaction(event)">
         <input type="hidden" id="tx-edit-id">
@@ -322,11 +327,11 @@
   </div>
 
   <!-- Modal: Add / Edit Budget -->
-  <div id="modal-budget" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-budget')">
+  <div id="modal-budget" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-budget-title" onclick="handleModalOverlayClick(event, 'modal-budget')">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-budget-title">🎯 Create Monthly Budget</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-budget')">✕</button>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-budget')">✕</button>
       </div>
       <form id="form-modal-budget" class="modal-form" onsubmit="handleSaveBudget(event)">
         <input type="hidden" id="budget-edit-id">
@@ -347,11 +352,11 @@
   </div>
 
   <!-- Modal: Add / Edit Bill -->
-  <div id="modal-bill" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-bill')">
+  <div id="modal-bill" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-bill-title" onclick="handleModalOverlayClick(event, 'modal-bill')">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-bill-title">📅 Add Upcoming Bill</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-bill')">✕</button>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-bill')">✕</button>
       </div>
       <form id="form-modal-bill" class="modal-form" onsubmit="handleSaveBill(event)">
         <input type="hidden" id="bill-edit-id">
@@ -394,11 +399,11 @@
   </div>
 
   <!-- Modal: Add / Edit Subscription -->
-  <div id="modal-sub" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-sub')">
+  <div id="modal-sub" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-sub-title" onclick="handleModalOverlayClick(event, 'modal-sub')">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-sub-title">🔁 Add Subscription</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-sub')">✕</button>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-sub')">✕</button>
       </div>
       <form id="form-modal-sub" class="modal-form" onsubmit="handleSaveSubscription(event)">
         <input type="hidden" id="sub-edit-id">
@@ -432,11 +437,11 @@
   </div>
 
   <!-- Modal: Add / Edit Goal -->
-  <div id="modal-goal" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-goal')">
+  <div id="modal-goal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-goal-title" onclick="handleModalOverlayClick(event, 'modal-goal')">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-goal-title">🏆 Create Financial Goal</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-goal')">✕</button>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-goal')">✕</button>
       </div>
       <form id="form-modal-goal" class="modal-form" onsubmit="handleSaveGoal(event)">
         <input type="hidden" id="goal-edit-id">
@@ -473,11 +478,11 @@
   </div>
 
   <!-- Modal: Add / Edit Account -->
-  <div id="modal-account" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-account')">
+  <div id="modal-account" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-account-title" onclick="handleModalOverlayClick(event, 'modal-account')">
     <div class="modal-card">
       <div class="modal-header">
         <h3 id="modal-account-title">🏦 Add Financial Account</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-account')">✕</button>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-account')">✕</button>
       </div>
       <form id="form-modal-account" class="modal-form" onsubmit="handleSaveAccount(event)">
         <input type="hidden" id="account-edit-id">
@@ -499,7 +504,7 @@
           </div>
           <div class="form-group">
             <label for="acc-form-balance">Current Balance (₹) *</label>
-            <input type="number" id="acc-form-balance" step="any" placeholder="e.g. 75000" required>
+            <input type="number" id="acc-form-balance" step="any" placeholder="e.g. 0" value="0" required>
           </div>
         </div>
         <div class="form-group">
@@ -515,10 +520,10 @@
   </div>
 
   <!-- Modal: Simulated Action Confirmation (Agent 3) -->
-  <div id="modal-action-confirm" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-action-confirm')">
+  <div id="modal-action-confirm" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-action-title" onclick="handleModalOverlayClick(event, 'modal-action-confirm')">
     <div class="modal-card modal-action-card">
       <div class="action-modal-header">
-        <div class="action-shield-icon">🛡️</div>
+        <div class="action-shield-icon" aria-hidden="true">🛡️</div>
         <div>
           <span class="badge badge-accent">Human Confirmation Required</span>
           <h3 id="modal-action-title">Simulated Financial Action</h3>
@@ -549,11 +554,11 @@
   </div>
 
   <!-- Modal: Forgot Password (UI prototype) -->
-  <div id="modal-forgot-pwd" class="modal-overlay hidden" onclick="handleModalOverlayClick(event, 'modal-forgot-pwd')">
+  <div id="modal-forgot-pwd" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-forgot-title" onclick="handleModalOverlayClick(event, 'modal-forgot-pwd')">
     <div class="modal-card">
       <div class="modal-header">
-        <h3>Reset Password</h3>
-        <button class="modal-close-btn" onclick="closeModal('modal-forgot-pwd')">✕</button>
+        <h3 id="modal-forgot-title">Reset Password</h3>
+        <button class="modal-close-btn" aria-label="Close dialog" onclick="closeModal('modal-forgot-pwd')">✕</button>
       </div>
       <div class="modal-body" style="padding: 16px 0;">
         <p class="text-secondary" style="margin-bottom: 16px;">In this prototype, you can sign in directly using the <strong>Instant 1-Click Demo Login</strong> button or enter any email and password on the Sign In screen.</p>
@@ -565,9 +570,9 @@
   <!-- ============================================================== -->
   <!-- 4. TOAST NOTIFICATIONS CONTAINER                               -->
   <!-- ============================================================== -->
-  <div id="toast-container" class="toast-container"></div>
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <!-- Application Controller Scripts -->
-  <script src="app.js?v=setup-fix-1"></script>
+  <script src="app.js?v=setup-fix-2"></script>
 </body>
 </html>

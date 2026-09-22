@@ -60,54 +60,60 @@ MoneyArnold/
 ## 🚀 Quickstart Guide
 
 ### 1. Prerequisites
-- **Python 3.10+**
-- **Azure CLI** installed ([Download Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli))
+- **Python 3.10+** (Python 3.11 or 3.12 recommended)
+- An active Azure AI Foundry Project (`MoneyArnold-01`) or API Key (configured in `backend/.env`)
 
-### 2. Local Azure Authentication (Windows / macOS)
-Open your terminal (PowerShell or Command Prompt on Windows, Terminal on Mac) and sign in:
-```bash
-az login
+---
+
+### 2. Fastest 1-Click Start (Windows)
+Simply double-click:
+```text
+run.bat
 ```
-*Make sure to log in with the Azure account that has access to your project `MoneyArnold-01`.*
+or in PowerShell:
+```powershell
+.\run.ps1
+```
+This automatically activates your virtual environment, launches the FastAPI server, connects to Azure AI Foundry, and hosts the frontend!
 
-### 3. Install Dependencies
+---
+
+### 3. Manual Terminal Startup
+
 ```bash
-# Navigate to backend directory
+# 1. Navigate to the backend directory
 cd backend
 
-# Create and activate a virtual environment
+# 2. Activate your virtual environment (if using one)
 # On Windows:
-python -m venv venv
-venv\Scripts\activate
+..\.venv\Scripts\activate
+# (or if you have venv inside backend: venv\Scripts\activate)
 
-# On Mac/Linux:
-python3 -m venv venv
-source venv/bin/activate
-
-# Install required packages
+# 3. Install dependencies (first time only)
 pip install -r requirements.txt
+
+# 4. Start the server
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-### 4. Test the Foundry Connection
-Run the diagnostic script to inspect your Azure AI Foundry project and agents:
-```bash
-python test_foundry.py
-```
-This script will:
-1. Verify authentication via `DefaultAzureCredential`.
-2. Connect to `https://MoneyArnold-01.services.ai.azure.com/api/projects/MoneyArnold-01`.
-3. Print all Agent Names and IDs discovered in your Foundry project.
+---
 
-*(Optional)* You can copy the printed Agent IDs into `backend/.env` to pin specific agents, though the client automatically auto-discovers them by name!
+### 4. Open in Your Browser
 
-### 5. Run the Financial Buddy Web App
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-Open your browser and navigate to:
+Navigate to:
 👉 **[http://localhost:8000](http://localhost:8000)**
 
-Click **"Run AI Workflow"** to see all three agents process the financial information, generate forecasts, and present simulated actions!
+* **Demo Login:** Click **"⚡ Instant 1-Click Demo Login"** (or use `demo@gmail.com` / `demo1234`).
+* **AI Assistant:** Navigate to the **AI Assistant** tab in the sidebar and ask any question to get live bulleted insights directly from your Azure AI Foundry Agent 4!
+
+---
+
+### 5. Verify the Azure AI Foundry Connection
+Run the diagnostic script to test your Azure AI Foundry credentials and list discovered agents:
+```bash
+cd backend
+python test_foundry.py
+```
 
 ---
 

@@ -149,4 +149,5 @@ class AIChatResponse(BaseModel):
     action: Optional[ProposedAction] = None
     requires_confirmation: bool = False
     agent_contributions: List[AgentContribution] = []
+    summarizer: Optional[Dict[str, Any]] = None
     raw_workflow_result: Optional[Dict[str, Any]] = None

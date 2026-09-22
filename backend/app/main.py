@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +28,7 @@ from app.models import (
     WhatIfComparison,
     ProposedAction
 )
-from app.foundry_client import FoundryClient
+from app.foundry_client import FoundryClient, format_as_bullet_points
 
 try:
     from dotenv import load_dotenv
@@ -78,7 +79,7 @@ def get_demo_seed_data() -> dict:
             },
             "currency": "₹",
             "user_name": "Demo User",
-            "user_email": "demo@financialbuddy.ai"
+            "user_email": "demo@gmail.com"
         },
         "accounts": [
             {
@@ -292,6 +293,102 @@ def save_stored_data(data: dict):
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
+def evaluate_dynamic_alerts(data: dict) -> dict:
+    """
+    Evaluates alerts dynamically based on actual spending vs budgets, upcoming bills, and account balances.
+    Preserves user resolved status for existing alerts.
+    """
+    budgets = data.get("budgets", [])
+    transactions = data.get("transactions", [])
+    bills = data.get("bills", [])
+    accounts = data.get("accounts", [])
+    profile = data.get("profile", {})
+    existing_alerts = {a.get("id"): a for a in data.get("alerts", []) if a.get("id")}
+
+    # Calculate actual spending by category from expense transactions
+    spending_by_category = {}
+    for tx in transactions:
+        if tx.get("type") != "income":
+            cat = tx.get("category", "Other")
+            spending_by_category[cat] = spending_by_category.get(cat, 0.0) + float(tx.get("amount", 0))
+
+    new_alerts = []
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    # 1. Budget Utilization Alerts
+    for b in budgets:
+        cat = b.get("category", "")
+        limit = float(b.get("amount", 0))
+        if limit <= 0 or not cat:
+            continue
+        spent = spending_by_category.get(cat, 0.0)
+        pct = round((spent / limit) * 100.0)
+        remaining = max(0.0, limit - spent)
+        alert_id = f"alert-budget-{cat.lower().replace(' ', '-')}"
+        prev_alert = existing_alerts.get(alert_id, {})
+        prev_status = prev_alert.get("status", "active")
+        prev_pct = prev_alert.get("meta", {}).get("pct", 0)
+        # Re-activate if spending increased past a new threshold
+        if prev_status == "resolved" and pct > prev_pct:
+            prev_status = "active"
+
+        if pct >= 100:
+            new_alerts.append({
+                "id": alert_id,
+                "level": "danger",
+                "title": f"{cat} Budget Exceeded ({pct}%)",
+                "message": f"You have spent ₹{spent:,.0f} of your ₹{limit:,.0f} {cat} budget. Discretionary limit has been exceeded by ₹{spent - limit:,.0f}.",
+                "status": prev_status,
+                "created_at": prev_alert.get("created_at") or now_str,
+                "meta": {"pct": pct, "category": cat, "spent": spent, "limit": limit}
+            })
+        elif pct >= 85: # Triggers at 85%, 90%, 95%
+            new_alerts.append({
+                "id": alert_id,
+                "level": "warning",
+                "title": f"{cat} Budget at {pct}% Threshold",
+                "message": f"You have spent ₹{spent:,.0f} of your ₹{limit:,.0f} {cat} budget ({pct}%). Only ₹{remaining:,.0f} remains for this cycle.",
+                "status": prev_status,
+                "created_at": prev_alert.get("created_at") or now_str,
+                "meta": {"pct": pct, "category": cat, "spent": spent, "limit": limit}
+            })
+
+    # 2. Upcoming Obligations & Liquidity Shortfall Alerts
+    unpaid_bills = [b for b in bills if b.get("status") != "paid"]
+    upcoming_bills_amt = sum(float(b.get("amount", 0)) for b in unpaid_bills)
+    liquid_bal = sum(float(a.get("balance", 0)) for a in accounts if a.get("type") != "Credit Card") if accounts else float(profile.get("current_balance", 0))
+
+    if upcoming_bills_amt > 0 and upcoming_bills_amt > liquid_bal:
+        b_id = "alert-liquidity-deficit"
+        prev_alert = existing_alerts.get(b_id, {})
+        new_alerts.append({
+            "id": b_id,
+            "level": "danger",
+            "title": "Urgent Liquidity Shortfall",
+            "message": f"Upcoming scheduled bills (₹{upcoming_bills_amt:,.0f}) exceed your liquid reserve (₹{liquid_bal:,.0f}) by ₹{upcoming_bills_amt - liquid_bal:,.0f}.",
+            "status": prev_alert.get("status", "active"),
+            "created_at": prev_alert.get("created_at") or now_str
+        })
+    elif upcoming_bills_amt > 0:
+        b_id = "alert-upcoming-bills"
+        prev_alert = existing_alerts.get(b_id, {})
+        new_alerts.append({
+            "id": b_id,
+            "level": "info",
+            "title": "Upcoming Bills Due Soon",
+            "message": f"₹{upcoming_bills_amt:,.0f} in scheduled obligations due soon. Reserve funds to ensure smooth settlement.",
+            "status": prev_alert.get("status", "active"),
+            "created_at": prev_alert.get("created_at") or now_str
+        })
+
+    # 3. Preserve non-budget, non-bill custom alerts (like feasibility)
+    for a_id, a_obj in existing_alerts.items():
+        if not a_id.startswith("alert-budget-") and a_id not in ["alert-liquidity-deficit", "alert-upcoming-bills"]:
+            new_alerts.append(a_obj)
+
+    data["alerts"] = new_alerts
+    return data
+
 # -------------------------------------------------------------
 # Core System Endpoints
 # -------------------------------------------------------------
@@ -342,9 +439,18 @@ def auth_login(req: UserAuthRequest):
     global current_user
     if not req.email or not req.password:
         raise HTTPException(status_code=400, detail="Email and password are required")
+    
+    is_demo = req.email.lower() in ["demo@gmail.com", "demouser@gmail.com", "demo@financialbuddy.ai"]
+    if is_demo:
+        seed_data = get_demo_seed_data()
+        seed_data["profile"]["user_name"] = "Demo User"
+        seed_data["profile"]["user_email"] = req.email.lower()
+        seed_data = evaluate_dynamic_alerts(seed_data)
+        save_stored_data(seed_data)
+
     current_user = {
         "email": req.email,
-        "name": req.name or req.email.split("@")[0].title(),
+        "name": req.name or ("Demo User" if is_demo else req.email.split("@")[0].title()),
         "is_authenticated": True
     }
     return {
@@ -364,23 +470,44 @@ def auth_signup(req: UserAuthRequest):
     current_user = {
         "email": req.email,
         "name": req.name or req.email.split("@")[0].title(),
-        "monthly_income": req.monthly_income or 60000.0,
+        "monthly_income": req.monthly_income or 0.0,
         "primary_goal": req.primary_goal or "Emergency Fund",
         "is_authenticated": True
     }
 
-    # If income was provided, update profile
-    data = load_stored_data()
-    if req.monthly_income:
-        data["profile"]["monthly_income"] = req.monthly_income
-    if req.name:
-        data["profile"]["user_name"] = req.name
-    data["profile"]["user_email"] = req.email
+    # Clean slate for new accounts: initialize all default values to zero
+    user_name = req.name or req.email.split("@")[0].title()
+    data = {
+        "profile": {
+            "current_balance": 0.0,
+            "monthly_income": req.monthly_income or 0.0,
+            "monthly_expenses": 0.0,
+            "upcoming_bills": 0.0,
+            "savings_goal": 0.0,
+            "current_savings": 0.0,
+            "planned_purchase": {
+                "item": "",
+                "amount": 0.0
+            },
+            "currency": "₹",
+            "user_name": user_name,
+            "user_email": req.email
+        },
+        "accounts": [],
+        "budgets": [],
+        "transactions": [],
+        "bills": [],
+        "subscriptions": [],
+        "goals": [],
+        "alerts": [],
+        "pending_action": None,
+        "action_history": []
+    }
     save_stored_data(data)
 
     return {
         "status": "success",
-        "message": "Account created successfully",
+        "message": "Account created successfully with zero default balances",
         "user": current_user
     }
 
@@ -400,12 +527,16 @@ def auth_logout():
 
 @app.get("/api/financial-data")
 def get_financial_data():
-    return load_stored_data()
+    data = load_stored_data()
+    data = evaluate_dynamic_alerts(data)
+    save_stored_data(data)
+    return data
 
 @app.post("/api/financial-data/profile")
 def update_profile(profile: FinancialProfile):
     data = load_stored_data()
     data["profile"] = profile.model_dump()
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
     return {"status": "success", "profile": data["profile"]}
 
@@ -416,6 +547,7 @@ def sync_financial_data(full_data: Dict[str, Any]):
     for key in ["profile", "accounts", "budgets", "transactions", "bills", "subscriptions", "goals"]:
         if key in full_data:
             data[key] = full_data[key]
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
     return {"status": "success", "message": "All financial data synchronized successfully", "data": data}
 
@@ -423,6 +555,7 @@ def sync_financial_data(full_data: Dict[str, Any]):
 def reset_to_demo_data():
     """Resets the data store to the realistic fintech demo state."""
     seed_data = get_demo_seed_data()
+    seed_data = evaluate_dynamic_alerts(seed_data)
     save_stored_data(seed_data)
     return {"status": "success", "message": "Data store reset to default demo dataset", "data": seed_data}
 
@@ -450,8 +583,9 @@ def add_transaction(tx: Transaction):
             break
 
     data["transactions"].insert(0, tx_dict)
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
-    return {"status": "success", "transaction": tx_dict, "transactions": data["transactions"]}
+    return {"status": "success", "transaction": tx_dict, "transactions": data["transactions"], "alerts": data["alerts"]}
 
 @app.put("/api/financial-data/transactions/{tx_id}")
 def update_transaction(tx_id: str, tx: Transaction):
@@ -467,8 +601,9 @@ def update_transaction(tx_id: str, tx: Transaction):
             break
     if not found:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
-    return {"status": "success", "transactions": data["transactions"]}
+    return {"status": "success", "transactions": data["transactions"], "alerts": data["alerts"]}
 
 @app.delete("/api/financial-data/transactions/{tx_id}")
 def delete_transaction(tx_id: str):
@@ -477,8 +612,9 @@ def delete_transaction(tx_id: str):
     data["transactions"] = [t for t in data.get("transactions", []) if t.get("id") != tx_id]
     if len(data["transactions"]) == initial_len:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
-    return {"status": "success", "transactions": data["transactions"]}
+    return {"status": "success", "transactions": data["transactions"], "alerts": data["alerts"]}
 
 # -------------------------------------------------------------
 # Budgets CRUD
@@ -499,8 +635,9 @@ def add_budget(budget: Budget):
             break
     if not existing:
         data["budgets"].append(b_dict)
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
-    return {"status": "success", "budgets": data["budgets"]}
+    return {"status": "success", "budgets": data["budgets"], "alerts": data["alerts"]}
 
 @app.put("/api/financial-data/budgets/{b_id}")
 def update_budget(b_id: str, budget: Budget):
@@ -511,8 +648,9 @@ def update_budget(b_id: str, budget: Budget):
             b_dict = budget.model_dump()
             b_dict["id"] = b_id
             budgets[i] = b_dict
+            data = evaluate_dynamic_alerts(data)
             save_stored_data(data)
-            return {"status": "success", "budgets": data["budgets"]}
+            return {"status": "success", "budgets": data["budgets"], "alerts": data["alerts"]}
     raise HTTPException(status_code=404, detail="Budget category not found")
 
 @app.delete("/api/financial-data/budgets/{b_id}")
@@ -522,8 +660,9 @@ def delete_budget(b_id: str):
     data["budgets"] = [b for b in data.get("budgets", []) if b.get("id") != b_id and b.get("category", "").lower() != b_id.lower()]
     if len(data["budgets"]) == initial_len:
         raise HTTPException(status_code=404, detail="Budget not found")
+    data = evaluate_dynamic_alerts(data)
     save_stored_data(data)
-    return {"status": "success", "budgets": data["budgets"]}
+    return {"status": "success", "budgets": data["budgets"], "alerts": data["alerts"]}
 
 # -------------------------------------------------------------
 # Bills CRUD
@@ -956,7 +1095,7 @@ def conversational_ai_chat(req: AIChatRequest):
             "amount": item_amt
         }
 
-    workflow_res = foundry_client.run_pipeline(temp_data)
+    workflow_res = foundry_client.run_pipeline(temp_data, user_query=msg)
     analyzer = workflow_res.get("analyzer", {})
     planner = workflow_res.get("planner", {})
     alert_action = workflow_res.get("alert_action", {})
@@ -999,11 +1138,18 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• **60-Day Recovery Outlook:** Liquid buffer estimated to rebuild to **₹{cash_flow.get('forecast_60_days_after', fc_after + monthly_surplus):,.0f}**.\n"
             f"• **90-Day Outlook:** Estimated balance of **₹{cash_flow.get('forecast_90_days_after', fc_after + (2 * monthly_surplus)):,.0f}**."
         )
+        if affordability.get('affordable', True):
+            advice = f"Setting aside **₹{upcoming_bills:,.0f}** for your upcoming bills is recommended. With your monthly surplus of **+₹{monthly_surplus:,.0f}/mo**, your liquid reserves are projected to recover within 30 to 60 days."
+        else:
+            advice = f"It is recommended to postpone this purchase until your liquid reserves exceed scheduled obligations (₹{upcoming_bills:,.0f}) and essential monthly expenses."
+
         msg_text = (
-            f"Based on your current financial state, purchasing the **{item_label}** for **₹{purchase_cost:,.0f}** "
-            f"{'is affordable with caution' if affordability.get('affordable', True) else 'poses high liquidity risk'}. "
-            f"It will leave you with an estimated **₹{curr_bal - purchase_cost:,.0f}** liquid reserve, or **₹{curr_bal - purchase_cost - upcoming_bills:,.0f}** "
-            f"after paying your scheduled bills."
+            f"Based on your current finances, purchasing the **{item_label}** for **₹{purchase_cost:,.0f}** "
+            f"{'is affordable with caution' if affordability.get('affordable', True) else 'poses high liquidity risk'}.\n\n"
+            f"• **Current Liquid Balance:** ₹{curr_bal:,.0f}\n"
+            f"• **Balance After Purchase:** ₹{curr_bal - purchase_cost:,.0f}\n"
+            f"• **Remaining Buffer After Upcoming Bills (₹{upcoming_bills:,.0f}):** ₹{curr_bal - purchase_cost - upcoming_bills:,.0f}\n\n"
+            f"{advice}"
         )
 
     elif intent == "what_if_analysis":
@@ -1061,9 +1207,9 @@ def conversational_ai_chat(req: AIChatRequest):
         sorted_cats = sorted(cat_spending.items(), key=lambda x: x[1], reverse=True)
         top_cat_str = ", ".join([f"**{cat}** (₹{amt:,.0f})" for cat, amt in sorted_cats[:3]]) if sorted_cats else "General"
 
-        summary = "Spending pattern audit from Agent 1 (Financial Analyzer)."
+        summary = "Spending pattern audit."
         understanding = (
-            f"Agent 1 reviewed your transaction stream. Total recorded outflows are **₹{monthly_expenses:,.0f}** across "
+            f"Review of your transaction stream: Total recorded outflows are **₹{monthly_expenses:,.0f}** across "
             f"**{len(expense_txs)} transactions**. Highest spending categories: {top_cat_str}."
         )
         why_it_matters = (
@@ -1073,8 +1219,11 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• At current daily burn rate, discretionary expenses will utilize approximately 82% of allocated category limits by month-end."
         )
         msg_text = (
-            f"Agent 1 identified that your primary spending this month is concentrated in {top_cat_str}. "
-            f"Your total monthly expenses stand at **₹{monthly_expenses:,.0f}** against an income of **₹{monthly_income:,.0f}**."
+            f"Your primary spending this month is concentrated in {top_cat_str}.\n\n"
+            f"• **Total Recorded Outflows:** ₹{monthly_expenses:,.0f} across {len(expense_txs)} transactions\n"
+            f"• **Monthly Income:** ₹{monthly_income:,.0f}\n"
+            f"• **Estimated Monthly Surplus:** +₹{monthly_surplus:,.0f}/mo\n\n"
+            f"Discretionary spending is pacing slightly high in shopping and dining. Keeping those under closer watch will preserve your monthly surplus for savings goals."
         )
 
     elif intent == "budget_analysis":
@@ -1082,9 +1231,9 @@ def conversational_ai_chat(req: AIChatRequest):
         exceeded = [b for b in budgets_analysis if b.get("percentage_used", 0) >= 100]
         warning = [b for b in budgets_analysis if 75 <= b.get("percentage_used", 0) < 100]
 
-        summary = "Monthly budget utilization analysis from Agent 1."
+        summary = "Monthly budget utilization analysis."
         understanding = (
-            f"Agent 1 monitors your category limits. You have **{len(budgets_analysis)} active budgets**. "
+            f"Active budget tracking: You have **{len(budgets_analysis)} active budgets**. "
             f"{f'{len(exceeded)} category exceeded, ' if exceeded else ''}{len(warning)} category approaching limit."
         )
         why_it_matters = (
@@ -1095,8 +1244,11 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• If spending in warning categories continues at current pace, you will have approximately ₹{sum(b.get('remaining', 0) for b in warning):,.0f} remaining headroom."
         )
         msg_text = (
-            f"Your budget health check: Shopping is currently at 75% utilization (₹6,000 of ₹8,000 used). "
-            f"Food & Dining has ₹5,650 remaining. Overall, you are within safe limits but should monitor shopping closely."
+            f"Here is your budget health check:\n\n"
+            f"• **Shopping:** 75% utilized (₹6,000 of ₹8,000 used)\n"
+            f"• **Food & Dining:** ₹5,650 remaining buffer\n"
+            f"• **Other Categories:** Well within limits\n\n"
+            f"Overall, you are within safe limits, but watch discretionary shopping closely for the rest of the cycle."
         )
 
     elif intent == "bill_analysis":
@@ -1117,8 +1269,13 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• With upcoming bills reserved, your net available liquid buffer remains healthy at **₹{curr_bal - total_unpaid:,.0f}**."
         )
         msg_text = (
-            f"You have **{len(unpaid)} upcoming bills** totaling **₹{total_unpaid:,.0f}** due soon (Rent: ₹15,000, Electricity: ₹2,500, Internet: ₹1,500, Mobile: ₹999). "
-            f"Agent 3 recommends reserving this amount now."
+            f"You have **{len(unpaid)} upcoming bills** totaling **₹{total_unpaid:,.0f}** due soon:\n\n"
+            f"• Rent: ₹15,000\n"
+            f"• Electricity: ₹2,500\n"
+            f"• Internet: ₹1,500\n"
+            f"• Mobile: ₹999\n\n"
+            f"After accounting for these, your available liquid reserve is **₹{curr_bal - total_unpaid:,.0f}**. "
+            f"It is recommended to keep these funds reserved to safeguard scheduled debits."
         )
 
     elif intent == "goal_analysis":
@@ -1126,9 +1283,9 @@ def conversational_ai_chat(req: AIChatRequest):
         gap = max(0.0, savings_goal - curr_savings)
         months_away = round(gap / monthly_surplus, 1) if monthly_surplus > 0 else 999.0
 
-        summary = f"Financial goal tracking from Agent 2: Emergency Fund is at {round((curr_savings / savings_goal) * 100)}%."
+        summary = f"Emergency Fund progress is at {round((curr_savings / savings_goal) * 100)}%."
         understanding = (
-            f"Agent 2 is tracking your target goals. Your Emergency Savings Goal is **₹{curr_savings:,.0f} / ₹{savings_goal:,.0f}** "
+            f"Goal tracking status: Your Emergency Savings Goal is **₹{curr_savings:,.0f} / ₹{savings_goal:,.0f}** "
             f"({round((curr_savings / savings_goal) * 100)}% complete). Remaining shortfall is **₹{gap:,.0f}**."
         )
         why_it_matters = (
@@ -1139,8 +1296,11 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• In 90 Days: Projected savings balance of **₹{curr_savings + (monthly_surplus * 1.5):,.0f}**."
         )
         msg_text = (
-            f"You are making steady progress on your emergency fund! You have saved **₹{curr_savings:,.0f}** towards your **₹{savings_goal:,.0f}** target. "
-            f"With a monthly surplus of **+₹{monthly_surplus:,.0f}**, you can reach your milestone in approximately **{months_away} months**."
+            f"You are making steady progress on your emergency fund!\n\n"
+            f"• **Current Savings:** ₹{curr_savings:,.0f} of ₹{savings_goal:,.0f} ({round((curr_savings / savings_goal) * 100)}% complete)\n"
+            f"• **Remaining Target:** ₹{gap:,.0f}\n"
+            f"• **Monthly Surplus:** +₹{monthly_surplus:,.0f}/mo\n"
+            f"• **Estimated Timeframe:** ~{months_away} months at current rate"
         )
 
     elif intent == "alert_explanation":
@@ -1151,7 +1311,7 @@ def conversational_ai_chat(req: AIChatRequest):
         summary = f"Contextual explanation of alert: '{alert_title}'."
         understanding = (
             f"This alert was generated because: **{alert_msg}**. "
-            f"Agent 1 detected that recent purchases at Amazon (₹4,500) and Bookstores (₹1,500) accelerated budget pace."
+            f"Recent purchases at Amazon (₹4,500) and Bookstores (₹1,500) accelerated budget pace."
         )
         why_it_matters = (
             f"Approaching the budget limit with upcoming bills due (₹{upcoming_bills:,.0f}) means further shopping could "
@@ -1161,15 +1321,15 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• If shopping spending stops for this period, you will retain **₹2,000** remaining budget buffer and preserve your full savings pace."
         )
         msg_text = (
-            f"**Alert Explanation:** '{alert_title}'\n"
-            f"Agent 1 flagged this because you have used 75% of your Shopping budget. "
-            f"To keep your finances balanced before upcoming bills are paid, Agent 2 recommends capping further shopping at ₹2,000 for the remainder of this cycle."
+            f"**Alert Explanation:** '{alert_title}'\n\n"
+            f"You have used 75% of your Shopping budget. "
+            f"To keep your finances balanced before upcoming bills are paid, it is recommended to cap further shopping at ₹2,000 for the remainder of this cycle."
         )
 
     else:
         summary = "Consolidated financial state review."
         understanding = (
-            f"Financial Buddy overview: Total liquid balance is **₹{curr_bal:,.0f}**, monthly income is **₹{monthly_income:,.0f}**, "
+            f"Financial overview: Total liquid balance is **₹{curr_bal:,.0f}**, monthly income is **₹{monthly_income:,.0f}**, "
             f"monthly living expenses are **₹{monthly_expenses:,.0f}**, and upcoming bills are **₹{upcoming_bills:,.0f}**."
         )
         why_it_matters = (
@@ -1180,11 +1340,29 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• Expected 60-day liquid position: **₹{curr_bal + (2 * monthly_surplus) - upcoming_bills:,.0f}**."
         )
         msg_text = (
-            f"Your current financial situation is stable. You have **₹{curr_bal:,.0f}** in liquid funds and a healthy monthly surplus of "
-            f"**+₹{monthly_surplus:,.0f}**. You have ₹{upcoming_bills:,.0f} in scheduled obligations to reserve before discretionary spending."
+            f"Your current financial situation is stable.\n\n"
+            f"• **Liquid Balance:** ₹{curr_bal:,.0f}\n"
+            f"• **Monthly Surplus:** +₹{monthly_surplus:,.0f}/mo (Income: ₹{monthly_income:,.0f}, Expenses: ₹{monthly_expenses:,.0f})\n"
+            f"• **Upcoming Bills:** ₹{upcoming_bills:,.0f}\n\n"
+            f"You have sufficient liquidity to cover scheduled bills while preserving your emergency savings trajectory."
         )
 
-    # 5. Agent Contributions Attribution
+    # 5. Agent Contributions Attribution (4-Agent Pipeline)
+    summarizer = workflow_res.get("summarizer", {})
+    health_status = summarizer.get("health_score", "Healthy & Stable")
+    live_text = (
+        summarizer.get("executive_summary")
+        or summarizer.get("message")
+        or workflow_res.get("message")
+    )
+    if live_text and workflow_res.get("execution_mode") in ["foundry_agent", "foundry_workflow_agent", "foundry_live_chain"]:
+        msg_text = format_as_bullet_points(live_text)
+        exec_summary_text = msg_text
+    else:
+        msg_text = format_as_bullet_points(msg_text)
+        summarizer["executive_summary"] = msg_text
+        exec_summary_text = msg_text
+
     agent_contributions = [
         AgentContribution(
             agent="Financial Analyzer (Agent 1)",
@@ -1200,6 +1378,11 @@ def conversational_ai_chat(req: AIChatRequest):
             agent="Proactive Alerts & Action (Agent 3)",
             stage="3",
             observation=f"Prepared simulated fund reservation; flagged {len(alert_action.get('alerts', []))} active warnings with human confirmation gating."
+        ),
+        AgentContribution(
+            agent="Executive Summarizer (Agent 4)",
+            stage="4",
+            observation=f"Synthesized outputs across Analyzer, Planner, and Alert agents into unified guidance; rated financial health as '{health_status}'."
         )
     ]
 
@@ -1230,7 +1413,7 @@ def conversational_ai_chat(req: AIChatRequest):
     return AIChatResponse(
         message=msg_text,
         intent=intent,
-        summary=summary,
+        summary=exec_summary_text,
         understanding=understanding,
         why_it_matters=why_it_matters,
         forecast=forecast,
@@ -1241,6 +1424,7 @@ def conversational_ai_chat(req: AIChatRequest):
         action=action_obj,
         requires_confirmation=req_confirm,
         agent_contributions=agent_contributions,
+        summarizer=summarizer,
         raw_workflow_result=workflow_res
     )
 

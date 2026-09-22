@@ -9,16 +9,16 @@ const API_BASE = window.location.origin.includes(':8000')
 // Global Application State
 const state = {
   profile: {
-    current_balance: 120000,
-    monthly_income: 60000,
-    monthly_expenses: 28500,
-    upcoming_bills: 19999,
-    savings_goal: 200000,
-    current_savings: 80000,
-    planned_purchase: { item: 'Laptop', amount: 50000 },
+    current_balance: 0.0,
+    monthly_income: 0.0,
+    monthly_expenses: 0.0,
+    upcoming_bills: 0.0,
+    savings_goal: 0.0,
+    current_savings: 0.0,
+    planned_purchase: { item: '', amount: 0.0 },
     currency: '₹',
-    user_name: 'Demo User',
-    user_email: 'demo@financialbuddy.ai'
+    user_name: 'New User',
+    user_email: ''
   },
   accounts: [],
   budgets: [],
@@ -167,7 +167,7 @@ function updatePageHeader(page) {
     },
     ai: {
       title: 'Financial Buddy AI Assistant',
-      subtitle: 'Powered by Microsoft Azure AI Foundry 3-agent pipeline with human-in-the-loop control'
+      subtitle: 'Powered by Microsoft Azure AI Foundry 4-agent pipeline with human-in-the-loop control'
     },
     alerts: {
       title: 'Alerts & Action Center',
@@ -205,6 +205,14 @@ function getLocalUsers() {
   } catch (e) {}
   // Default seeded demo user
   const defaultUsers = [
+    {
+      email: 'demo@gmail.com',
+      password: 'demo1234',
+      name: 'Demo User',
+      monthly_income: 60000,
+      primary_goal: 'Emergency Fund',
+      is_authenticated: true
+    },
     {
       email: 'demo@financialbuddy.ai',
       password: 'demo1234',
@@ -289,9 +297,13 @@ async function handleLogin(e) {
   const matched = users.find(u => u.email.toLowerCase() === email && u.password === password);
 
   // Match demo or local storage user
-  if (matched || (email === 'demo@financialbuddy.ai' && (password === 'demo1234' || password === 'demo'))) {
+  const isDemoEmail = email === 'demo@gmail.com' || email === 'demouser@gmail.com' || email === 'demo@financialbuddy.ai';
+  const isDemoPwd = password === 'demo1234' || password === 'demo';
+  const isDemoLogin = isDemoEmail && isDemoPwd;
+
+  if (matched || isDemoLogin) {
     const activeUser = matched || {
-      email: 'demo@financialbuddy.ai',
+      email: email || 'demo@gmail.com',
       name: 'Demo User',
       monthly_income: 60000,
       primary_goal: 'Emergency Fund',
@@ -309,6 +321,10 @@ async function handleLogin(e) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name: activeUser.name })
       });
+      if (isDemoEmail) {
+        await fetch(`${API_BASE}/api/financial-data/reset`, { method: 'POST' });
+        await loadFinancialData();
+      }
     } catch (err) {}
 
     hideAuthScreen();
@@ -361,8 +377,8 @@ async function handleSignup(e) {
   const email = emailInput.value.trim().toLowerCase();
   const password = pwdInput.value;
   const confirmPassword = confirmPwdInput ? confirmPwdInput.value : '';
-  const income = incomeInput ? (parseFloat(incomeInput.value) || 60000) : 60000;
-  const goal = goalInput ? goalInput.value : 'Emergency Fund';
+  const income = incomeInput ? (parseFloat(incomeInput.value) || 0) : 0;
+  const goal = goalInput ? goalInput.value : 'General Savings';
 
   if (password !== confirmPassword) {
     if (errEl) {
@@ -381,13 +397,7 @@ async function handleSignup(e) {
   if (errEl) errEl.classList.add('hidden');
 
   const users = getLocalUsers();
-  if (users.some(u => u.email.toLowerCase() === email)) {
-    if (errEl) {
-      errEl.textContent = 'An account with this email already exists. Please sign in.';
-      errEl.classList.remove('hidden');
-    }
-    return;
-  }
+  const existingIndex = users.findIndex(u => u.email.toLowerCase() === email);
 
   const newUser = {
     name,
@@ -398,26 +408,49 @@ async function handleSignup(e) {
     is_authenticated: true
   };
 
-  users.push(newUser);
+  if (existingIndex >= 0) {
+    users[existingIndex] = newUser;
+  } else {
+    users.push(newUser);
+  }
   saveLocalUsers(users);
 
-  state.authUser = {
-    name,
-    email,
-    monthly_income: income,
-    primary_goal: goal,
-    is_authenticated: true
-  };
+  state.authUser = newUser;
   localStorage.setItem('fb_user', JSON.stringify(state.authUser));
 
-  // Update profile in state
-  state.profile.user_name = name;
-  state.profile.user_email = email;
-  state.profile.monthly_income = income;
+  // Initialize new account with all default values set to zero
+  state.profile = {
+    current_balance: 0.0,
+    monthly_income: income,
+    monthly_expenses: 0.0,
+    upcoming_bills: 0.0,
+    savings_goal: 0.0,
+    current_savings: 0.0,
+    planned_purchase: { item: '', amount: 0.0 },
+    currency: '₹',
+    user_name: name,
+    user_email: email
+  };
+  state.accounts = [];
+  state.budgets = [];
+  state.transactions = [];
+  state.bills = [];
+  state.subscriptions = [];
+  state.goals = [];
+  state.alerts = [];
+  state.actionHistory = [];
+  state.action_history = [];
+  state.pending_action = null;
+  state.chatMessages = [];
+  saveChatHistory();
 
-  // Optional backend sync
+  // Reset filter states
+  state.txSearchQuery = '';
+  state.txCategoryFilter = 'all';
+
+  // Backend sync to persist fresh zero state
   try {
-    await fetch(`${API_BASE}/api/auth/signup`, {
+    const res = await fetch(`${API_BASE}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -428,19 +461,23 @@ async function handleSignup(e) {
         primary_goal: goal
       })
     });
-  } catch (err) {}
+    if (res.ok) {
+      await loadFinancialData();
+    }
+  } catch (err) {
+    console.warn('Backend signup error, using zero state:', err);
+  }
 
   hideAuthScreen();
   updateUserUI();
-  await loadFinancialData();
-  loadChatHistory();
-  showToast(`Welcome to Financial Buddy, ${name}!`, 'success');
+  updateBadgeCounts();
+  showToast(`Welcome, ${name}! Your new account is ready with zero starting balances.`, 'success');
   navigate('dashboard');
 }
 
-function handleQuickDemoLogin() {
+async function handleQuickDemoLogin() {
   const demoUser = {
-    email: 'demo@financialbuddy.ai',
+    email: 'demo@gmail.com',
     name: 'Demo User',
     monthly_income: 60000,
     primary_goal: 'Emergency Fund',
@@ -451,6 +488,10 @@ function handleQuickDemoLogin() {
   hideAuthScreen();
   updateUserUI();
   loadChatHistory();
+  try {
+    await fetch(`${API_BASE}/api/financial-data/reset`, { method: 'POST' });
+    await loadFinancialData();
+  } catch (e) {}
   showToast('Signed in with Demo Financial Profile', 'info');
   navigate('dashboard');
 }
@@ -535,10 +576,111 @@ async function loadFinancialData() {
     state.pending_action = data.pending_action || null;
     state.action_history = data.action_history || [];
 
+    evaluateDynamicAlertsClient();
     updateBadgeCounts();
   } catch (err) {
     console.warn('Could not fetch financial data, using local fallback:', err);
+    evaluateDynamicAlertsClient();
+    updateBadgeCounts();
   }
+}
+
+function evaluateDynamicAlertsClient() {
+  if (!state.budgets) return;
+
+  const categorySpending = {};
+  (state.transactions || []).forEach(t => {
+    if (t.type !== 'income') {
+      const cat = t.category || 'Other';
+      categorySpending[cat] = (categorySpending[cat] || 0) + parseFloat(t.amount || 0);
+    }
+  });
+
+  const c = (state.profile && state.profile.currency) || '₹';
+  const existingAlerts = {};
+  (state.alerts || []).forEach(a => {
+    if (a.id) existingAlerts[a.id] = a;
+  });
+
+  const newAlerts = [];
+
+  // 1. Dynamic Budget Alerts
+  state.budgets.forEach(b => {
+    const cat = b.category;
+    const limit = parseFloat(b.amount || 0);
+    if (!cat || limit <= 0) return;
+
+    const spent = categorySpending[cat] || 0;
+    const pct = Math.round((spent / limit) * 100);
+    const remaining = Math.max(0, limit - spent);
+    const alertId = `alert-budget-${cat.toLowerCase().replace(/\s+/g, '-')}`;
+    const prev = existingAlerts[alertId];
+    let prevStatus = prev ? prev.status : 'active';
+    const prevPct = prev && prev.meta ? prev.meta.pct : 0;
+    if (prevStatus === 'resolved' && pct > prevPct) {
+      prevStatus = 'active';
+    }
+
+    if (pct >= 100) {
+      newAlerts.push({
+        id: alertId,
+        level: 'danger',
+        title: `${cat} Budget Exceeded (${pct}%)`,
+        message: `You have spent ${c}${formatNumber(spent)} of your ${c}${formatNumber(limit)} ${cat} budget. Discretionary limit has been exceeded by ${c}${formatNumber(spent - limit)}.`,
+        status: prevStatus,
+        created_at: prev && prev.created_at ? prev.created_at : new Date().toISOString(),
+        meta: { pct, category: cat, spent, limit }
+      });
+    } else if (pct >= 85) {
+      newAlerts.push({
+        id: alertId,
+        level: 'warning',
+        title: `${cat} Budget at ${pct}% Threshold`,
+        message: `You have spent ${c}${formatNumber(spent)} of your ${c}${formatNumber(limit)} ${cat} budget (${pct}%). Only ${c}${formatNumber(remaining)} remains for this cycle.`,
+        status: prevStatus,
+        created_at: prev && prev.created_at ? prev.created_at : new Date().toISOString(),
+        meta: { pct, category: cat, spent, limit }
+      });
+    }
+  });
+
+  // 2. Upcoming Obligations vs Liquid Balance
+  const unpaidBills = (state.bills || []).filter(b => b.status !== 'paid');
+  const billsAmt = unpaidBills.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0);
+  const fin = computeFinancialState();
+
+  if (billsAmt > 0 && billsAmt > fin.totalBalance) {
+    const bId = 'alert-liquidity-deficit';
+    const prev = existingAlerts[bId];
+    newAlerts.push({
+      id: bId,
+      level: 'danger',
+      title: 'Urgent Liquidity Shortfall',
+      message: `Upcoming scheduled bills (${c}${formatNumber(billsAmt)}) exceed your available liquid balance (${c}${formatNumber(fin.totalBalance)}) by ${c}${formatNumber(billsAmt - fin.totalBalance)}.`,
+      status: prev ? prev.status : 'active',
+      created_at: prev && prev.created_at ? prev.created_at : new Date().toISOString()
+    });
+  } else if (billsAmt > 0) {
+    const bId = 'alert-upcoming-bills';
+    const prev = existingAlerts[bId];
+    newAlerts.push({
+      id: bId,
+      level: 'info',
+      title: 'Upcoming Bills Due Soon',
+      message: `${c}${formatNumber(billsAmt)} in scheduled obligations due soon. Keep funds reserved for upcoming settlement.`,
+      status: prev ? prev.status : 'active',
+      created_at: prev && prev.created_at ? prev.created_at : new Date().toISOString()
+    });
+  }
+
+  // 3. Preserve non-budget custom alerts
+  (state.alerts || []).forEach(a => {
+    if (!a.id || (!a.id.startsWith('alert-budget-') && a.id !== 'alert-liquidity-deficit' && a.id !== 'alert-upcoming-bills')) {
+      newAlerts.push(a);
+    }
+  });
+
+  state.alerts = newAlerts;
 }
 
 function updateBadgeCounts() {
@@ -575,7 +717,7 @@ async function triggerRunWorkflow() {
 
     // Refresh store from backend to capture any server-side simulated changes
     await loadFinancialData();
-    showToast('Azure AI Foundry 3-Agent Analysis complete!', 'success');
+    showToast('Azure AI Foundry 4-Agent Analysis complete!', 'success');
 
     // Re-render current page
     navigate(state.activePage, false);
@@ -605,29 +747,29 @@ function computeFinancialState() {
   const incomeTxs = state.transactions.filter(t => t.type === 'income');
   const txIncomeTotal = incomeTxs.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
   const profileIncome = parseFloat(state.profile.monthly_income);
-  const monthlyIncome = Number.isFinite(profileIncome) && profileIncome > 0
+  const monthlyIncome = Number.isFinite(profileIncome)
     ? profileIncome
-    : (txIncomeTotal || 60000);
+    : (txIncomeTotal || 0);
 
   // 3. Monthly Expenses: Sum of expense transactions or profile
   const expenseTxs = state.transactions.filter(t => t.type !== 'income');
   const monthlyExpenses = expenseTxs.length > 0
     ? expenseTxs.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0)
-    : parseFloat(state.profile.monthly_expenses || 28500);
+    : parseFloat(state.profile.monthly_expenses || 0);
 
   // 4. Surplus / Deficit
   const monthlySurplus = monthlyIncome - monthlyExpenses;
 
   // 5. Savings
-  const currentSavings = parseFloat(state.profile.current_savings || 80000);
-  const savingsGoal = parseFloat(state.profile.savings_goal || 200000);
+  const currentSavings = parseFloat(state.profile.current_savings || 0);
+  const savingsGoal = parseFloat(state.profile.savings_goal || 0);
   const savingsRate = monthlyIncome > 0 ? Math.round((monthlySurplus / monthlyIncome) * 100) : 0;
 
   // 6. Upcoming Obligations (Sum of unpaid bills)
   const unpaidBills = state.bills.filter(b => b.status !== 'paid');
   const upcomingBills = unpaidBills.length > 0
     ? unpaidBills.reduce((sum, b) => sum + parseFloat(b.amount || 0), 0)
-    : parseFloat(state.profile.upcoming_bills || 19999);
+    : parseFloat(state.profile.upcoming_bills || 0);
 
   return {
     totalBalance,
@@ -663,7 +805,7 @@ function renderDashboard(container) {
           <div class="metric-amount">${c}${formatNumber(fin.totalBalance)}</div>
           <div class="metric-footer">
             <span class="delta-badge delta-positive">● Liquid Ready</span>
-            <span class="text-muted">Across ${state.accounts.length || 3} accounts</span>
+            <span class="text-muted">Across ${state.accounts.length} account${state.accounts.length === 1 ? '' : 's'}</span>
           </div>
         </div>
 
@@ -721,7 +863,7 @@ function renderDashboard(container) {
           <div class="metric-amount">${c}${formatNumber(fin.currentSavings)}</div>
           <div class="metric-footer">
             <span class="delta-badge delta-positive">
-              ${Math.round((fin.currentSavings / fin.savingsGoal) * 100)}% of ${c}${formatNumber(fin.savingsGoal)}
+              ${fin.savingsGoal > 0 ? Math.round((fin.currentSavings / fin.savingsGoal) * 100) : 0}% of ${c}${formatNumber(fin.savingsGoal)}
             </span>
             <span class="text-muted">Target Goal</span>
           </div>
@@ -925,7 +1067,7 @@ function renderFinancialIntelligenceHtml(fin) {
   const planner = wf ? wf.planner : null;
   const alertAction = wf ? wf.alert_action : null;
 
-  const planned = state.profile.planned_purchase || { item: 'Laptop', amount: 50000 };
+  const planned = state.profile.planned_purchase || { item: '', amount: 0 };
 
   return `
     <section class="financial-intelligence-section">
@@ -933,10 +1075,10 @@ function renderFinancialIntelligenceHtml(fin) {
         <div>
           <div class="fi-title-badge">
             <h2>Financial Intelligence</h2>
-            <span class="badge badge-purple">Microsoft Azure AI Foundry 3-Agent Workflow</span>
+            <span class="badge badge-purple">Microsoft Azure AI Foundry 4-Agent Workflow</span>
           </div>
           <p class="text-secondary" style="font-size:13px;">
-            Continuous multi-agent reasoning: <strong>Observe → Understand → Connect Context → Explain → Predict → Recommend → Human Confirmation</strong>
+            Continuous multi-agent reasoning: <strong>Observe → Understand → Connect Context → Explain → Predict → Recommend → Synthesize → Human Confirmation</strong>
           </p>
         </div>
         <button class="btn btn-primary btn-sm" onclick="triggerRunWorkflow()">
@@ -957,18 +1099,20 @@ function renderFinancialIntelligenceHtml(fin) {
           <div class="agent-body-list">
             <div class="agent-body-item">
               <span>●</span>
-              <span><strong>Transaction Patterns:</strong> ${state.transactions.length} transactions processed. Top spend in Food and Shopping.</span>
+              <span><strong>Transaction Patterns:</strong> ${state.transactions.length > 0 ? `${state.transactions.length} transactions processed.` : '0 transactions recorded.'}</span>
             </div>
             <div class="agent-body-item">
               <span>●</span>
-              <span><strong>Subscription Audit:</strong> ${state.subscriptions.length} active recurring subscriptions identified (${c}${formatNumber(calculateMonthlySubscriptionTotal())}/mo).</span>
+              <span><strong>Subscription Audit:</strong> ${state.subscriptions.length > 0 ? `${state.subscriptions.length} active recurring subscriptions (${c}${formatNumber(calculateMonthlySubscriptionTotal())}/mo).` : '0 active subscriptions.'}</span>
             </div>
             <div class="agent-body-item">
               <span>●</span>
               <span><strong>Budget Alert:</strong> ${
                 analyzer && analyzer.alerts && analyzer.alerts.length > 0
                   ? analyzer.alerts[0]
-                  : 'Shopping budget reached 75% limit threshold.'
+                  : state.alerts.length > 0
+                    ? state.alerts[0].message
+                    : 'All category budgets healthy and clear.'
               }</span>
             </div>
           </div>
@@ -989,16 +1133,18 @@ function renderFinancialIntelligenceHtml(fin) {
               <span><strong>Affordability Verdict:</strong> ${
                 planner && planner.affordability_analysis
                   ? planner.affordability_analysis.verdict
-                  : `Purchasing the ${c}${formatNumber(planned.amount)} ${planned.item} is affordable with caution, maintaining ${c}${formatNumber(fin.totalBalance - planned.amount)} liquid buffer.`
+                  : (planned.item && planned.amount > 0)
+                    ? `Evaluating purchase of ${c}${formatNumber(planned.amount)} ${planned.item}.`
+                    : 'Ready to evaluate purchase feasibility and cash flow projections.'
               }</span>
             </div>
             <div class="agent-body-item">
               <span>●</span>
-              <span><strong>30/60/90 Day Forecast:</strong> Projected balance is ${c}${formatNumber(fin.totalBalance + fin.monthlySurplus - fin.upcomingBills)} in 30 days at surplus pace.</span>
+              <span><strong>30/60/90 Day Forecast:</strong> Projected balance is ${c}${formatNumber(fin.totalBalance + fin.monthlySurplus - fin.upcomingBills)} in 30 days.</span>
             </div>
             <div class="agent-body-item">
               <span>●</span>
-              <span><strong>Goal Pace:</strong> Emergency fund shortfall is ${c}${formatNumber(Math.max(0, fin.savingsGoal - fin.currentSavings))} (~${fin.monthlySurplus > 0 ? Math.ceil(Math.max(0, fin.savingsGoal - fin.currentSavings) / fin.monthlySurplus) : '∞'} months away).</span>
+              <span><strong>Goal Pace:</strong> ${fin.savingsGoal > 0 ? `Savings goal shortfall is ${c}${formatNumber(Math.max(0, fin.savingsGoal - fin.currentSavings))}.` : 'No savings goals configured yet.'}</span>
             </div>
           </div>
         </div>
@@ -1022,12 +1168,39 @@ function renderFinancialIntelligenceHtml(fin) {
               <span><strong>Prepared Action:</strong> ${
                 state.pending_action
                   ? state.pending_action.description
-                  : `Reserve ${c}${formatNumber(fin.upcomingBills)} for upcoming obligations.`
+                  : fin.upcomingBills > 0
+                    ? `Reserve ${c}${formatNumber(fin.upcomingBills)} for upcoming obligations.`
+                    : 'No pending financial actions required.'
               }</span>
             </div>
             <div class="agent-body-item">
               <span>●</span>
               <span class="text-warning"><strong>Human-in-the-Loop:</strong> Actions require human confirmation. No real bank accounts are accessed.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent 4: Executive Summarizer & Synthesizer -->
+        <div class="agent-card">
+          <div class="agent-card-header">
+            <div class="agent-icon-box agent-4-icon" style="background:rgba(56, 189, 248, 0.18); color:#38bdf8;">📋</div>
+            <div class="agent-info">
+              <h4>Agent 4: Executive Summarizer</h4>
+              <span>Multi-Agent Synthesis & Health Verdict</span>
+            </div>
+          </div>
+          <div class="agent-body-list">
+            <div class="agent-body-item">
+              <span>●</span>
+              <span><strong>Synthesis:</strong> Unified briefing condensing Analyzer, Planner, and Alert insights.</span>
+            </div>
+            <div class="agent-body-item">
+              <span>●</span>
+              <span><strong>Health Status:</strong> ${fin.monthlySurplus > 0 && fin.totalBalance > fin.monthlyExpenses ? '<span class="text-success" style="font-weight:700;">Healthy & Stable</span>' : '<span class="text-warning" style="font-weight:700;">Moderate Attention Needed</span>'} (Liquidity: ${c}${formatNumber(fin.totalBalance)}).</span>
+            </div>
+            <div class="agent-body-item">
+              <span>●</span>
+              <span><strong>AI Assistant Tab:</strong> Direct conversational access with executive summary cards.</span>
             </div>
           </div>
         </div>
@@ -1532,7 +1705,16 @@ function renderBudgetsPage(container) {
         </div>
 
         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:20px;">
-          ${state.budgets.map(b => {
+          ${state.budgets.length === 0 ? `
+            <div class="card" style="grid-column: 1 / -1; padding:48px; text-align:center;">
+              <div class="empty-state">
+                <span class="empty-icon">🎯</span>
+                <span class="empty-title">No Category Budgets Configured</span>
+                <span class="empty-desc">Create monthly spending limits for Food, Shopping, Transport, or Bills to track utilization.</span>
+                <button class="btn btn-primary" onclick="openAddBudgetModal()">➕ Create First Budget</button>
+              </div>
+            </div>
+          ` : state.budgets.map(b => {
             const limit = parseFloat(b.amount || 0);
             const spent = state.transactions
               .filter(t => t.type !== 'income' && t.category === b.category)
@@ -1878,7 +2060,16 @@ function renderAccountsPage(container) {
 
       <!-- Accounts Grid -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:20px;">
-        ${state.accounts.map(a => {
+        ${state.accounts.length === 0 ? `
+          <div class="card" style="grid-column: 1 / -1; padding:48px; text-align:center;">
+            <div class="empty-state">
+              <span class="empty-icon">🏦</span>
+              <span class="empty-title">No Accounts Linked</span>
+              <span class="empty-desc">Link your bank accounts, savings reserves, cash wallets, or credit cards to monitor liquidity.</span>
+              <button class="btn btn-primary" onclick="openAddAccountModal()">➕ Add First Account</button>
+            </div>
+          </div>
+        ` : state.accounts.map(a => {
           const isNegative = parseFloat(a.balance || 0) < 0;
           return `
             <div class="card" style="display:flex; flex-direction:column; justify-content:space-between; gap:16px;">
@@ -1977,20 +2168,35 @@ function saveChatHistory() {
   }
 }
 
+function cleanAgentMentions(text) {
+  if (!text || typeof text !== 'string') return text || '';
+  return text
+    .replace(/\bAgent\s*[1-4]\b:?/gi, '')
+    .replace(/\bStage\s*[1-4]\b:?/gi, '')
+    .replace(/\(Agent\s*[1-4][^)]*\)/gi, '')
+    .replace(/Agent 1 \(Financial Analyzer\)/gi, 'Financial Analyzer')
+    .replace(/Agent 2 \(Financial Planner\)/gi, 'Financial Planner')
+    .replace(/Agent 3 \(Proactive Alerts & Action\)/gi, 'Safeguards')
+    .replace(/Agent 4 \(Executive Summarizer\)/gi, 'Financial Assistant')
+    .replace(/Coordinated across Agent[^\n.]*\./gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function renderAIAssistantPage(container) {
   const fin = computeFinancialState();
   const c = fin.currency;
 
   container.innerHTML = `
     <div class="ai-assistant-container">
-      <!-- Left: Conversational Area -->
+      <!-- Conversational Area -->
       <div class="ai-chat-card">
         <div class="ai-chat-header">
           <div style="display:flex; align-items:center; gap:10px;">
             <div class="chat-avatar ai-avatar">🤖</div>
             <div>
-              <h3 style="font-size:15px; font-weight:700;">Financial Buddy AI</h3>
-              <span class="badge badge-purple" style="font-size:10px;">Microsoft Azure AI Foundry 3-Agent Workflow</span>
+              <h3 style="font-size:15px; font-weight:700;">Financial Assistant</h3>
+              <span class="badge badge-purple" style="font-size:10px;">Online</span>
             </div>
           </div>
           <button class="btn btn-outline btn-sm" onclick="clearAIChat()" title="Clear history and start fresh">
@@ -2021,16 +2227,15 @@ function renderAIAssistantPage(container) {
         </div>
 
         <!-- Chat Message Stream -->
-        <div class="ai-chat-messages" id="ai-chat-messages">
+        <div class="ai-chat-messages" id="ai-chat-messages" role="log" aria-live="polite">
           <!-- Initial AI Welcome Bubble -->
           <div class="chat-message">
             <div class="chat-avatar ai-avatar">🤖</div>
             <div class="chat-bubble">
-              <p>Hello! I am your <strong>Financial Buddy</strong>, powered by Microsoft Azure AI Foundry's 3-agent intelligence pipeline.</p>
+              <p>Hello! I am your <strong>Financial Assistant</strong>.</p>
               <p style="margin-top:6px; color:var(--text-secondary);">
-                Every inquiry flows across our coordinated multi-agent workflow: <strong>Agent 1 (Financial Analyzer)</strong> categorizes & audits your spending, <strong>Agent 2 (Financial Planner)</strong> models cash-flow forecasts & scenario feasibility, and <strong>Agent 3 (Proactive Alerts & Action)</strong> safeguards your balance with human-authorized simulation gates.
+                Ask me any questions about your finances—like whether you can afford a purchase, how your spending is tracking, or what bills are coming up.
               </p>
-              <p style="margin-top:6px;">Ask me anything about major purchases, multi-turn what-if scenarios, bills, or budget limits!</p>
             </div>
           </div>
 
@@ -2039,9 +2244,9 @@ function renderAIAssistantPage(container) {
 
         <!-- Input Bar -->
         <form class="ai-chat-input-bar" onsubmit="handleSendAIChat(event)">
-          <input type="text" id="ai-chat-input" placeholder="Ask Financial Buddy (e.g. 'Can I buy a ₹30,000 phone?' or 'What if I wait 2 months?')..." required autocomplete="off">
-          <button type="submit" id="btn-ai-send" class="btn btn-primary">
-            <span>Ask AI</span>
+          <input type="text" id="ai-chat-input" placeholder="Ask anything (e.g. 'Can I buy a ₹30,000 phone?' or 'How is my budget?')..." required autocomplete="off" aria-label="Ask Financial Assistant">
+          <button type="submit" id="btn-ai-send" class="btn btn-primary" aria-label="Send message to AI assistant">
+            <span>Send</span>
           </button>
         </form>
       </div>
@@ -2060,7 +2265,7 @@ function renderAIAssistantPage(container) {
           </div>
           <div class="context-item">
             <span class="text-secondary">Emergency Savings:</span>
-            <strong>${c}${formatNumber(fin.currentSavings)} <small class="text-muted">(${Math.round((fin.currentSavings/fin.savingsGoal)*100)}%)</small></strong>
+            <strong>${c}${formatNumber(fin.currentSavings)} <small class="text-muted">(${fin.savingsGoal > 0 ? Math.round((fin.currentSavings/fin.savingsGoal)*100) : 0}%)</small></strong>
           </div>
           <div class="context-item">
             <span class="text-secondary">Upcoming Bills:</span>
@@ -2069,27 +2274,6 @@ function renderAIAssistantPage(container) {
           <div class="context-item">
             <span class="text-secondary">Discretionary Remaining:</span>
             <strong>${c}${formatNumber(fin.remainingBudget)}</strong>
-          </div>
-        </div>
-
-        <div class="context-card">
-          <h4>3-Agent Foundry Pipeline</h4>
-          <div style="font-size:12px; color:var(--text-secondary); display:flex; flex-direction:column; gap:10px;">
-            <div>
-              <strong style="color:#38bdf8;">Agent 1: Financial Analyzer</strong>
-              <div style="font-size:11px; color:var(--text-muted);">Categorization, merchant recognition & spending audits.</div>
-            </div>
-            <div>
-              <strong style="color:#c084fc;">Agent 2: Financial Planner</strong>
-              <div style="font-size:11px; color:var(--text-muted);">30/60/90-day cash flow projections & what-if scenario modeling.</div>
-            </div>
-            <div>
-              <strong style="color:#fbbf24;">Agent 3: Proactive Alerts & Action</strong>
-              <div style="font-size:11px; color:var(--text-muted);">Overdraft safeguards & simulated action prep with human gate.</div>
-            </div>
-            <div class="text-muted" style="font-size:11px; border-top:1px solid var(--border-subtle); padding-top:8px;">
-              Connected to Azure AI Foundry endpoint with live context injection.
-            </div>
           </div>
         </div>
       </div>
@@ -2115,198 +2299,50 @@ function renderChatMessageHtml(msg) {
     `;
   }
 
-  // Structured AI response
-  const structured = msg.structured;
-  if (structured) {
-    const c = state.profile.currency || '₹';
-    const fin = computeFinancialState();
-    const actionJsonStr = structured.action ? escapeHtml(JSON.stringify(structured.action)) : '';
+  // Assistant response (synthesized from the multi-agent pipeline into a single direct answer)
+  let answerHtml = '';
+  let actionHtml = '';
 
-    return `
-      <div class="chat-message">
-        <div class="chat-avatar ai-avatar">🤖</div>
-        <div class="chat-bubble" style="max-width:100%;">
-          <div class="structured-ai-response">
+  if (msg.structured) {
+    const s = msg.structured;
+    let text = s.message || (s.summarizer && s.summarizer.executive_summary) || s.summary || '';
+    text = cleanAgentMentions(text);
 
-            <!-- Executive Summary / Direct Answer -->
-            ${structured.summary ? `
-              <div class="ai-section-box summary">
-                <div class="ai-section-label">📋 Executive Summary</div>
-                <div style="font-weight:600; font-size:13px; line-height:1.5;">${formatMarkdownSnippet(structured.summary)}</div>
-              </div>
-            ` : (structured.message && !structured.understanding ? `
-              <div class="ai-section-box summary">
-                <div class="ai-section-label">📋 Financial Buddy Answer</div>
-                <div>${formatMarkdownSnippet(structured.message)}</div>
-              </div>
-            ` : '')}
+    answerHtml = formatMarkdownSnippet(text);
 
-            <!-- Understanding (Agent 1 Context & Categorization) -->
-            ${structured.understanding ? `
-              <div class="ai-section-box understanding">
-                <div class="ai-section-label">🧠 Agent 1: Financial Context & Baseline</div>
-                <div>${formatMarkdownSnippet(structured.understanding)}</div>
-              </div>
-            ` : ''}
-
-            <!-- Why It Matters (Contextual Impact) -->
-            ${structured.why_it_matters ? `
-              <div class="ai-section-box why-matters">
-                <div class="ai-section-label">💡 Why It Matters</div>
-                <div>${formatMarkdownSnippet(structured.why_it_matters)}</div>
-              </div>
-            ` : ''}
-
-            <!-- Forecast (Agent 2 Cash Flow Projections) -->
-            ${structured.forecast ? `
-              <div class="ai-section-box forecast">
-                <div class="ai-section-label">📈 Agent 2: 30 / 60 / 90 Day Cash Flow Forecast</div>
-                <div>${formatMarkdownSnippet(structured.forecast)}</div>
-              </div>
-            ` : ''}
-
-            <!-- What-If Scenario Comparison Card -->
-            ${structured.what_if ? `
-              <div class="what-if-card">
-                <div class="what-if-header">
-                  <div class="what-if-title">🔄 Scenario Comparison: ${escapeHtml(structured.what_if.scenario || structured.what_if.scenario_name || 'What-If Analysis')}</div>
-                  <span class="badge badge-purple" style="font-size:10px;">Agent 2 Scenario Model</span>
-                </div>
-                <div class="what-if-grid">
-                  <div class="what-if-stat">
-                    <div class="stat-label">Current Balance</div>
-                    <div class="stat-value">${c}${formatNumber(structured.what_if.current_balance ?? structured.what_if.current_surplus ?? fin.totalBalance)}</div>
-                  </div>
-                  <div class="what-if-stat">
-                    <div class="stat-label">Projected Balance</div>
-                    <div class="stat-value text-primary">${c}${formatNumber(structured.what_if.projected_balance ?? structured.what_if.projected_surplus ?? 0)}</div>
-                  </div>
-                  <div class="what-if-stat">
-                    <div class="stat-label">Emergency Savings</div>
-                    <div class="stat-value text-success">${c}${formatNumber(structured.what_if.current_savings ?? fin.currentSavings)}</div>
-                  </div>
-                  <div class="what-if-stat">
-                    <div class="stat-label">Projected Savings</div>
-                    <div class="stat-value text-success">${c}${formatNumber(structured.what_if.projected_savings ?? fin.currentSavings)}</div>
-                  </div>
-                </div>
-                <div class="what-if-verdict feasible">
-                  <span style="font-size:16px;">💡</span>
-                  <div>
-                    <strong>Scenario Impact:</strong> ${formatMarkdownSnippet(structured.what_if.impact_summary || '')}
-                  </div>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- Recommendations (Agent 2) -->
-            ${((structured.recommendations && structured.recommendations.length > 0) || structured.recommendation) ? `
-              <div class="ai-section-box recommendation">
-                <div class="ai-section-label">🎯 Recommendations & Strategic Next Steps</div>
-                ${structured.recommendations && structured.recommendations.length > 0 ? `
-                  <ul class="ai-rec-list">
-                    ${structured.recommendations.map(r => `
-                      <li class="ai-rec-item">
-                        <span class="ai-rec-icon">✔</span>
-                        <span>${formatMarkdownSnippet(r)}</span>
-                      </li>
-                    `).join('')}
-                  </ul>
-                ` : `
-                  <div>${formatMarkdownSnippet(structured.recommendation)}</div>
-                `}
-              </div>
-            ` : ''}
-
-            <!-- Active Safeguard Alerts (Agent 3) -->
-            ${structured.alerts && structured.alerts.length > 0 ? `
-              <div class="ai-section-box alerts-box">
-                <div class="ai-section-label">⚠️ Agent 3 Active Safeguard Alerts</div>
-                <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
-                  ${structured.alerts.map(a => {
-                    let alertContent = '';
-                    if (typeof a === 'string') {
-                      alertContent = formatMarkdownSnippet(a);
-                    } else if (a && typeof a === 'object') {
-                      alertContent = a.title ? `<strong>${escapeHtml(a.title)}:</strong> ${escapeHtml(a.message || '')}` : escapeHtml(a.message || JSON.stringify(a));
-                    }
-                    return `
-                      <div class="ai-alert-pill">
-                        <span>⚠️</span>
-                        <span>${alertContent}</span>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- Agent 3 Proposed Simulated Action & Human Confirmation Gate -->
-            ${structured.action ? `
-              <div class="pending-action-banner" style="margin-top:6px; padding:14px 18px; border-radius:var(--radius-md);">
-                <div class="p-action-left">
-                  <div class="p-action-icon" style="font-size:22px;">🛡️</div>
-                  <div class="p-action-text">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                      <h4 style="font-size:13px; margin:0;">Agent 3 Proposed Action: ${escapeHtml(structured.action.type || 'Simulated Action')}</h4>
-                      <span class="badge badge-warning" style="font-size:10px;">Human Authorization Required</span>
-                    </div>
-                    <p style="font-size:12px; margin-top:4px; color:var(--text-secondary);">${escapeHtml(structured.action.description || '')}</p>
-                    ${structured.action.amount ? `
-                      <div style="font-size:12px; margin-top:4px;">
-                        <strong>Target Amount:</strong> <span style="font-weight:700; color:var(--primary);">${c}${formatNumber(structured.action.amount)}</span>
-                      </div>
-                    ` : ''}
-                  </div>
-                </div>
-                <div class="p-action-buttons">
-                  <button class="btn btn-secondary btn-sm" onclick='handleExecuteActionDecision(false, ${actionJsonStr})'>✕ Dismiss</button>
-                  <button class="btn btn-success btn-sm" onclick='handleExecuteActionDecision(true, ${actionJsonStr})'>✓ Review & Confirm</button>
-                </div>
-              </div>
-            ` : ''}
-
-            <!-- Agent Contributions (Full 3-Agent Workflow Trace) -->
-            ${structured.agent_contributions && structured.agent_contributions.length > 0 ? `
-              <div class="agent-contributions-card">
-                <div class="agent-contributions-summary" onclick="toggleAgentTrail(this)">
-                  <span style="font-size:11px; font-weight:700; color:var(--text-secondary); display:flex; align-items:center; gap:6px;">
-                    <span>⚡</span> Azure AI Foundry 3-Agent Workflow Trace (${structured.agent_contributions.length} Agents)
-                  </span>
-                  <span class="trail-chevron" style="font-size:10px;">▼</span>
-                </div>
-                <div class="agent-trail-list" style="display:none;">
-                  ${structured.agent_contributions.map(ac => {
-                    const agentName = ac.agent || ac.agent_name || ac.agent_id || 'Foundry Agent';
-                    const stage = ac.stage ? `Stage ${ac.stage}: ` : '';
-                    const role = ac.role || '';
-                    const obs = ac.observation || ac.contribution || '';
-                    const badgeClass = (ac.stage === '1' || agentName.includes('Analyzer')) ? 'badge-agent-1' : ((ac.stage === '2' || agentName.includes('Planner')) ? 'badge-agent-2' : 'badge-agent-3');
-                    return `
-                      <div class="agent-trail-step">
-                        <span class="agent-step-badge ${badgeClass}">${escapeHtml(stage + agentName)}</span>
-                        <div>
-                          ${role ? `<strong style="font-size:11px; color:var(--text-primary);">${escapeHtml(role)}: </strong>` : ''}
-                          <span style="font-size:11px; color:var(--text-secondary);">${formatMarkdownSnippet(obs)}</span>
-                        </div>
-                      </div>
-                    `;
-                  }).join('')}
-                </div>
-              </div>
-            ` : ''}
-
+    // If an actionable recommendation is present (e.g. reserve upcoming bill funds)
+    if (s.action) {
+      const actionJsonStr = escapeHtml(JSON.stringify(s.action));
+      const c = state.profile.currency || '₹';
+      const actionDesc = cleanAgentMentions(s.action.description || 'Reserve funds for scheduled obligations');
+      actionHtml = `
+        <div class="chat-action-card">
+          <div class="chat-action-info">
+            <span class="chat-action-icon">🛡️</span>
+            <div>
+              <div class="chat-action-title">${escapeHtml(actionDesc)}</div>
+              ${s.action.amount ? `<div class="chat-action-amount">Amount: <strong>${c}${formatNumber(s.action.amount)}</strong></div>` : ''}
+            </div>
+          </div>
+          <div class="chat-action-btns">
+            <button class="btn btn-secondary btn-sm" onclick='handleExecuteActionDecision(false, ${actionJsonStr})'>Dismiss</button>
+            <button class="btn btn-primary btn-sm" onclick='handleExecuteActionDecision(true, ${actionJsonStr})'>Confirm & Apply</button>
           </div>
         </div>
-      </div>
-    `;
+      `;
+    }
+  } else {
+    answerHtml = formatMarkdownSnippet(cleanAgentMentions(msg.content || ''));
   }
 
   return `
     <div class="chat-message">
       <div class="chat-avatar ai-avatar">🤖</div>
       <div class="chat-bubble">
-        <p>${formatMarkdownSnippet(msg.content)}</p>
+        <div class="chat-answer-content">
+          ${answerHtml}
+        </div>
+        ${actionHtml}
       </div>
     </div>
   `;
@@ -2622,7 +2658,7 @@ function renderSetupPage(container) {
         <div class="form-row">
           <div class="form-group">
             <label for="setup-income">Monthly Take-Home Income (${escapeHtml(c)})</label>
-            <input type="number" id="setup-income" min="0" step="any" value="${state.profile.monthly_income || 60000}">
+            <input type="number" id="setup-income" min="0" step="any" value="${Number.isFinite(state.profile.monthly_income) ? state.profile.monthly_income : 0}">
           </div>
           <div class="form-group">
             <label for="setup-currency">Preferred Currency Symbol</label>
@@ -2636,7 +2672,7 @@ function renderSetupPage(container) {
           </div>
           <div class="form-group">
             <label for="setup-savings-goal">Savings Goal (${escapeHtml(c)})</label>
-            <input type="number" id="setup-savings-goal" min="0" step="any" value="${state.profile.savings_goal || 200000}">
+            <input type="number" id="setup-savings-goal" min="0" step="any" value="${Number.isFinite(state.profile.savings_goal) ? state.profile.savings_goal : 0}">
           </div>
         </div>
       </div>
@@ -2763,11 +2799,11 @@ function renderSetupPage(container) {
         <div class="form-row">
           <div class="form-group">
             <label for="setup-purchase-item">Planned Purchase Item Name</label>
-            <input type="text" id="setup-purchase-item" value="${escapeHtml(planned.item || 'Laptop')}">
+            <input type="text" id="setup-purchase-item" value="${escapeHtml(planned.item || '')}">
           </div>
           <div class="form-group">
             <label for="setup-purchase-cost">Planned Purchase Cost (${escapeHtml(c)})</label>
-            <input type="number" id="setup-purchase-cost" min="0" step="any" value="${planned.amount || 50000}">
+            <input type="number" id="setup-purchase-cost" min="0" step="any" value="${Number.isFinite(planned.amount) ? planned.amount : 0}">
           </div>
         </div>
         <div class="table-responsive">
@@ -2909,11 +2945,11 @@ async function handleSaveFullSetup() {
     ...state.profile,
     user_name: name,
     user_email: email,
-    monthly_income: Number.isFinite(income) ? income : 60000,
+    monthly_income: Number.isFinite(income) ? income : 0,
     currency,
     current_savings: Number.isFinite(currentSavings) ? currentSavings : 0,
-    savings_goal: Number.isFinite(savingsGoal) ? savingsGoal : 200000,
-    planned_purchase: { item, amount: Number.isFinite(cost) ? cost : 50000 },
+    savings_goal: Number.isFinite(savingsGoal) ? savingsGoal : 0,
+    planned_purchase: { item, amount: Number.isFinite(cost) ? cost : 0 },
     current_balance: liquidBalance,
     upcoming_bills: unpaidBills
   };
@@ -3065,6 +3101,14 @@ async function renderSettingsPage(container) {
           </div>
         </div>
 
+        <div class="form-row" style="margin-top:12px;">
+          <div class="form-group" style="flex:1;">
+            <label>Agent 4 ID: Executive Summarizer &amp; Synthesizer</label>
+            <input type="text" id="foundry-summarizer-id" placeholder="e.g. asst_summarizer_xxx" value="${foundryConfig ? escapeHtml(foundryConfig.summarizer_id || '') : ''}">
+            <small class="text-muted">Synthesizes all agent outputs into unified executive guidance</small>
+          </div>
+        </div>
+
         <div style="margin-top:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
           <label class="checkbox-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="checkbox" id="foundry-mock-fallback" ${foundryConfig && foundryConfig.use_mock_fallback ? 'checked' : ''}>
@@ -3212,6 +3256,7 @@ async function saveFoundrySettings() {
   const analyzerId = document.getElementById('foundry-analyzer-id')?.value.trim();
   const plannerId = document.getElementById('foundry-planner-id')?.value.trim();
   const actionId = document.getElementById('foundry-action-id')?.value.trim();
+  const summarizerId = document.getElementById('foundry-summarizer-id')?.value.trim();
   const useMockFallback = document.getElementById('foundry-mock-fallback')?.checked;
 
   try {
@@ -3221,6 +3266,7 @@ async function saveFoundrySettings() {
       analyzer_id: analyzerId,
       planner_id: plannerId,
       action_id: actionId,
+      summarizer_id: summarizerId,
       use_mock_fallback: useMockFallback
     };
     if (apiKey) payload.api_key = apiKey;
@@ -3314,20 +3360,22 @@ function initCashFlowChart() {
   // Multi-day labels depending on filter
   let labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
   let incomeData = [fin.monthlyIncome * 0.25, fin.monthlyIncome * 0.25, fin.monthlyIncome * 0.25, fin.monthlyIncome * 0.25];
-  let expenseData = [fin.monthlyExpenses * 0.2, fin.monthlyExpenses * 0.35, fin.monthlyExpenses * 0.25, fin.monthlyExpenses * 0.2];
+  let expenseData = [fin.monthlyExpenses * 0.25, fin.monthlyExpenses * 0.25, fin.monthlyExpenses * 0.25, fin.monthlyExpenses * 0.25];
 
   if (state.periodFilter === '7d') {
     labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     incomeData = [0, 0, 0, 0, fin.monthlyIncome * 0.2, 0, 0];
-    expenseData = [1200, 450, 2500, 800, 1500, 3200, 950];
+    expenseData = fin.monthlyExpenses > 0
+      ? [fin.monthlyExpenses * 0.1, fin.monthlyExpenses * 0.05, fin.monthlyExpenses * 0.2, fin.monthlyExpenses * 0.15, fin.monthlyExpenses * 0.15, fin.monthlyExpenses * 0.25, fin.monthlyExpenses * 0.1]
+      : [0, 0, 0, 0, 0, 0, 0];
   } else if (state.periodFilter === '3m') {
-    labels = ['July 2026', 'August 2026', 'September 2026'];
-    incomeData = [58000, 60000, fin.monthlyIncome];
-    expenseData = [27000, 29000, fin.monthlyExpenses];
+    labels = ['Month -2', 'Month -1', 'Current Month'];
+    incomeData = [fin.monthlyIncome, fin.monthlyIncome, fin.monthlyIncome];
+    expenseData = [fin.monthlyExpenses, fin.monthlyExpenses, fin.monthlyExpenses];
   } else if (state.periodFilter === '6m') {
-    labels = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
-    incomeData = [55000, 58000, 58000, 60000, 60000, fin.monthlyIncome];
-    expenseData = [26000, 28000, 31000, 27000, 29000, fin.monthlyExpenses];
+    labels = ['Month -5', 'Month -4', 'Month -3', 'Month -2', 'Month -1', 'Current Month'];
+    incomeData = [fin.monthlyIncome, fin.monthlyIncome, fin.monthlyIncome, fin.monthlyIncome, fin.monthlyIncome, fin.monthlyIncome];
+    expenseData = [fin.monthlyExpenses, fin.monthlyExpenses, fin.monthlyExpenses, fin.monthlyExpenses, fin.monthlyExpenses, fin.monthlyExpenses];
   }
 
   state.charts['cashFlow'] = new Chart(ctx, {
@@ -3358,7 +3406,7 @@ function initCashFlowChart() {
       maintainAspectRatio: false,
       plugins: {
         legend: {
-          labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 12 } }
+          labels: { color: '#334155', font: { family: 'Plus Jakarta Sans', size: 12 } }
         },
         tooltip: {
           backgroundColor: '#0f172a',
@@ -3373,13 +3421,13 @@ function initCashFlowChart() {
       },
       scales: {
         x: {
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
-          ticks: { color: '#64748b', font: { family: 'Plus Jakarta Sans' } }
+          grid: { color: 'rgba(0, 0, 0, 0.06)' },
+          ticks: { color: '#475569', font: { family: 'Plus Jakarta Sans' } }
         },
         y: {
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          grid: { color: 'rgba(0, 0, 0, 0.06)' },
           ticks: {
-            color: '#64748b',
+            color: '#475569',
             font: { family: 'Plus Jakarta Sans' },
             callback: (val) => '₹' + Number(val).toLocaleString()
           }
@@ -3406,15 +3454,16 @@ function initSpendingDonutChart() {
 
   const labels = Object.keys(categoryTotals);
   const data = Object.values(categoryTotals);
+  const hasData = data.length > 0 && data.some(v => v > 0);
 
   state.charts['spendingDonut'] = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: labels.length > 0 ? labels : ['Food', 'Shopping', 'Transport', 'Bills'],
+      labels: hasData ? labels : ['No Outflows Recorded'],
       datasets: [
         {
-          data: data.length > 0 ? data : [4350, 6000, 2200, 2500],
-          backgroundColor: [
+          data: hasData ? data : [1],
+          backgroundColor: hasData ? [
             '#3b82f6',
             '#8b5cf6',
             '#06b6d4',
@@ -3422,8 +3471,8 @@ function initSpendingDonutChart() {
             '#10b981',
             '#ec4899',
             '#64748b'
-          ],
-          borderColor: '#131b2e',
+          ] : ['#e2e8f0'],
+          borderColor: '#ffffff',
           borderWidth: 3
         }
       ]
@@ -3435,14 +3484,14 @@ function initSpendingDonutChart() {
       plugins: {
         legend: {
           position: 'right',
-          labels: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 12 } }
+          labels: { color: '#334155', font: { family: 'Plus Jakarta Sans', size: 12 } }
         },
         tooltip: {
           backgroundColor: '#0f172a',
           titleColor: '#f8fafc',
           bodyColor: '#cbd5e1',
           callbacks: {
-            label: (ctx) => ` ${ctx.label}: ₹${ctx.parsed.toLocaleString()}`
+            label: (ctx) => hasData ? ` ${ctx.label}: ₹${ctx.parsed.toLocaleString()}` : ' No spending recorded yet'
           }
         }
       }
@@ -3463,6 +3512,8 @@ function openAddAccountModal() {
   document.getElementById('account-edit-id').value = '';
   const form = document.getElementById('form-modal-account');
   if (form) form.reset();
+  const balInput = document.getElementById('acc-form-balance');
+  if (balInput) balInput.value = '0';
   openModal('modal-account');
 }
 
@@ -3581,6 +3632,27 @@ async function handleSaveTransaction(e) {
     }
     closeModal('modal-tx');
     await loadFinancialData();
+
+    // Check if category budget triggered warning or breach
+    if (type !== 'income') {
+      const budget = (state.budgets || []).find(b => b.category.toLowerCase() === category.toLowerCase());
+      if (budget) {
+        const limit = parseFloat(budget.amount || 0);
+        let catSpent = 0;
+        (state.transactions || []).forEach(t => {
+          if (t.type !== 'income' && (t.category || '').toLowerCase() === category.toLowerCase()) {
+            catSpent += parseFloat(t.amount || 0);
+          }
+        });
+        const pct = limit > 0 ? Math.round((catSpent / limit) * 100) : 0;
+        if (pct >= 100) {
+          showToast(`🚨 Alert: ${category} budget exceeded (${pct}%)!`, 'danger');
+        } else if (pct >= 85) {
+          showToast(`⚠️ Alert: ${category} budget has reached ${pct}% threshold!`, 'warning');
+        }
+      }
+    }
+
     navigate(state.activePage, false);
   } catch (err) {
     showToast('Failed to save transaction', 'danger');
@@ -3937,11 +4009,43 @@ function formatMarkdownSnippet(text) {
   } else if (typeof text !== 'string') {
     text = String(text);
   }
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/^[•\-\*]\s*(.*?)(?=\n|$)/gm, '<div style="margin-left:8px;">• $1</div>')
-    .replace(/\n/g, '<br>');
+
+  const rawLines = text.split('\n');
+  const bulletItems = [];
+
+  for (let rawLine of rawLines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+
+    // Handle lines that may contain multiple bullets e.g. "• Point 1 • Point 2"
+    const subBullets = line.split(/(?=[•\-\*]\s+)/);
+    for (let sub of subBullets) {
+      let trimmed = sub.trim();
+      if (!trimmed) continue;
+
+      // Clean leading bullet symbol or numeric counter
+      let cleanContent = trimmed
+        .replace(/^[•\-\*]\s*/, '')
+        .replace(/^\d+[\.\)]\s*/, '')
+        .trim();
+      if (!cleanContent) continue;
+
+      // Apply markdown bold and italic
+      let formatted = escapeHtml(cleanContent)
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+      bulletItems.push(`
+        <div class="ai-bullet-point">
+          <span class="ai-bullet-dot">•</span>
+          <span class="ai-bullet-text">${formatted}</span>
+        </div>
+      `);
+    }
+  }
+
+  if (bulletItems.length === 0) return '';
+  return `<div class="ai-bullet-list">${bulletItems.join('')}</div>`;
 }
 
 function showToast(message, type = 'info') {
@@ -3973,3 +4077,13 @@ function handleGlobalSearch(query) {
     renderTransactionsPage(document.getElementById('page-container'));
   }
 }
+
+// Global Accessibility: Dismiss open modals when pressing Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const activeModal = document.querySelector('.modal-overlay:not(.hidden)');
+    if (activeModal) {
+      closeModal(activeModal.id);
+    }
+  }
+});

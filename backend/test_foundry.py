@@ -33,8 +33,14 @@ def test_connection_and_list_agents():
         print("Please install them with: pip install azure-ai-projects azure-identity python-dotenv")
         sys.exit(1)
 
-    print("\n[1/3] Authenticating with DefaultAzureCredential...")
-    credential = DefaultAzureCredential()
+    api_key = os.getenv("AZURE_AI_PROJECT_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+    if api_key:
+        print("\n[1/3] Authenticating with AzureKeyCredential (API Key)...")
+        from azure.core.credentials import AzureKeyCredential
+        credential = AzureKeyCredential(api_key)
+    else:
+        print("\n[1/3] Authenticating with DefaultAzureCredential...")
+        credential = DefaultAzureCredential()
 
     try:
         project_client = AIProjectClient(

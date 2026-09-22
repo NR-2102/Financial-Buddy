@@ -5,6 +5,43 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger("financial_buddy.foundry")
 
+def format_as_bullet_points(text: str) -> str:
+    """Converts any text or paragraph into clean bullet points with each point on its own new line."""
+    if not text or not str(text).strip():
+        return ""
+    import re
+    raw = str(text).strip()
+    raw_lines = [l.strip() for l in raw.split("\n") if l.strip()]
+    bullet_lines = []
+    
+    for line in raw_lines:
+        # If line contains multiple bullet points merged on same line (e.g. "• Point 1 • Point 2")
+        parts = re.split(r'(?=[•\-\*]\s+)', line)
+        for part in parts:
+            p = part.strip()
+            if not p:
+                continue
+            if p.startswith("•") or p.startswith("- ") or p.startswith("* "):
+                cleaned = p.lstrip("•-* ").strip()
+                if cleaned:
+                    bullet_lines.append(f"• {cleaned}")
+            elif re.match(r'^\d+[\.\)]\s*', p):
+                cleaned = re.sub(r'^\d+[\.\)]\s*', '', p).strip()
+                if cleaned:
+                    bullet_lines.append(f"• {cleaned}")
+            else:
+                # If it's a long sentence or paragraph, split by sentence into individual bullet points
+                if len(p) > 100 and (". " in p or "? " in p or "! " in p):
+                    sentences = re.split(r'(?<=[.!?])\s+', p)
+                    for s in sentences:
+                        s_clean = s.strip().lstrip("•-* ").strip()
+                        if s_clean:
+                            bullet_lines.append(f"• {s_clean}")
+                else:
+                    bullet_lines.append(f"• {p}")
+                    
+    return "\n".join(bullet_lines)
+
 class FoundryClient:
     def __init__(self):
         self.endpoint = os.getenv(
@@ -15,10 +52,12 @@ class FoundryClient:
         self.tenant_id = os.getenv("AZURE_TENANT_ID") or ""
         self.client_id = os.getenv("AZURE_CLIENT_ID") or ""
         self.client_secret = os.getenv("AZURE_CLIENT_SECRET") or ""
+        self.agent_id = os.getenv("AZURE_AI_AGENT_ID") or os.getenv("FOUNDRY_AGENT_ID") or ""
         self.workflow_id = os.getenv("FOUNDRY_WORKFLOW_ID") or ""
         self.analyzer_id = os.getenv("AGENT_ANALYZER_ID") or ""
         self.planner_id = os.getenv("AGENT_PLANNER_ID") or ""
         self.action_id = os.getenv("AGENT_ACTION_ID") or ""
+        self.summarizer_id = os.getenv("AGENT_SUMMARIZER_ID") or ""
         self.use_mock_fallback = os.getenv("USE_MOCK_FALLBACK", "false").lower() == "true"
         
         self._project_client = None
@@ -30,10 +69,12 @@ class FoundryClient:
         return {
             "endpoint": self.endpoint,
             "has_api_key": bool(self.api_key),
+            "agent_id": self.agent_id,
             "workflow_id": self.workflow_id,
             "analyzer_id": self.analyzer_id,
             "planner_id": self.planner_id,
             "action_id": self.action_id,
+            "summarizer_id": self.summarizer_id,
             "use_mock_fallback": self.use_mock_fallback,
             "auth_method": "API Key" if self.api_key else ("Service Principal" if (self.tenant_id and self.client_id) else "Azure Identity (CLI / Default)")
         }
@@ -44,6 +85,8 @@ class FoundryClient:
             self.endpoint = cfg["endpoint"].strip()
         if "api_key" in cfg:
             self.api_key = cfg["api_key"].strip() if cfg["api_key"] else ""
+        if "agent_id" in cfg:
+            self.agent_id = cfg["agent_id"].strip() if cfg["agent_id"] else ""
         if "workflow_id" in cfg:
             self.workflow_id = cfg["workflow_id"].strip() if cfg["workflow_id"] else ""
         if "analyzer_id" in cfg:
@@ -52,6 +95,8 @@ class FoundryClient:
             self.planner_id = cfg["planner_id"].strip() if cfg["planner_id"] else ""
         if "action_id" in cfg:
             self.action_id = cfg["action_id"].strip() if cfg["action_id"] else ""
+        if "summarizer_id" in cfg:
+            self.summarizer_id = cfg["summarizer_id"].strip() if cfg["summarizer_id"] else ""
         if "use_mock_fallback" in cfg:
             self.use_mock_fallback = bool(cfg["use_mock_fallback"])
 
@@ -116,58 +161,146 @@ class FoundryClient:
         if self._agents_discovered and not force:
             return self._last_discovery
 
-        client = self.get_client()
-        if not client:
-            return {}
-
         discovered = {}
-        # Try Foundry Hosted / Workflow Agents
-        try:
-            if hasattr(client.agents, "list"):
-                for agent in client.agents.list():
-                    name = getattr(agent, "name", "")
-                    aid = getattr(agent, "id", "")
-                    if name and aid:
-                        discovered[name] = aid
-            elif hasattr(client.agents, "list_agents"):
-                for agent in client.agents.list_agents().data:
-                    name = getattr(agent, "name", "")
-                    aid = getattr(agent, "id", "")
-                    if name and aid:
-                        discovered[name] = aid
-        except Exception as e:
-            logger.debug(f"client.agents.list check: {e}")
 
-        # Try Azure OpenAI Assistants API
-        try:
-            openai_client = client.get_openai_client()
-            assts = openai_client.beta.assistants.list()
-            for asst in assts.data:
-                name = asst.name or ""
-                aid = asst.id
-                if name and aid and name not in discovered:
-                    discovered[name] = aid
-        except Exception as e:
-            logger.debug(f"openai_client.beta.assistants check: {e}")
+        # 1. Primary method: Direct Azure AI Foundry REST API using API Key
+        if self.api_key and self.endpoint:
+            try:
+                import httpx
+                r = httpx.get(
+                    f"{self.endpoint}/agents?api-version=v1",
+                    headers={"api-key": self.api_key},
+                    timeout=15.0
+                )
+                if r.status_code == 200:
+                    data = r.json().get("data", [])
+                    for a in data:
+                        name = a.get("name") or a.get("id")
+                        aid = a.get("id")
+                        latest = a.get("versions", {}).get("latest", {})
+                        guid = latest.get("agent_guid")
+                        if name and aid:
+                            discovered[name] = aid
+                        if guid and aid:
+                            discovered[guid] = aid
+                    logger.info(f"Discovered Azure AI Foundry Agents via REST API: {list(discovered.keys())}")
+            except Exception as e:
+                logger.debug(f"Direct Foundry REST agents discovery error: {e}")
 
+        # 2. Secondary method: Azure AIProjectClient SDK / Assistants API
+        if not discovered:
+            client = self.get_client()
+            if client:
+                try:
+                    if hasattr(client.agents, "list"):
+                        for agent in client.agents.list():
+                            name = getattr(agent, "name", "")
+                            aid = getattr(agent, "id", "")
+                            if name and aid:
+                                discovered[name] = aid
+                    elif hasattr(client.agents, "list_agents"):
+                        for agent in client.agents.list_agents().data:
+                            name = getattr(agent, "name", "")
+                            aid = getattr(agent, "id", "")
+                            if name and aid:
+                                discovered[name] = aid
+                except Exception as e:
+                    logger.debug(f"client.agents.list check: {e}")
+
+                try:
+                    openai_client = client.get_openai_client()
+                    assts = openai_client.beta.assistants.list()
+                    for asst in assts.data:
+                        name = asst.name or ""
+                        aid = asst.id
+                        if name and aid and name not in discovered:
+                            discovered[name] = aid
+                except Exception as e:
+                    logger.debug(f"openai_client.beta.assistants check: {e}")
+
+        # Map discovered agent roles if not explicitly pinned
         for name, aid in discovered.items():
             name_lower = name.lower()
-            if not self.analyzer_id and ("analyzer" in name_lower or "categor" in name_lower):
+            if not self.analyzer_id and ("agent-1" in name_lower or "categor" in name_lower or "analyzer" in name_lower):
                 self.analyzer_id = aid
-            elif not self.planner_id and ("planner" in name_lower or "forecast" in name_lower):
+            elif not self.planner_id and ("agent-2" in name_lower or "budget" in name_lower or "planner" in name_lower):
                 self.planner_id = aid
-            elif not self.action_id and ("action" in name_lower or "alert" in name_lower):
+            elif not self.action_id and ("agent-3" in name_lower or "alert" in name_lower or "action" in name_lower):
                 self.action_id = aid
-            elif not self.workflow_id and ("workflow" in name_lower or "buddy" in name_lower):
+            elif not self.summarizer_id and ("agent-4" in name_lower or "summar" in name_lower or "synthes" in name_lower):
+                self.summarizer_id = aid
+            elif not self.agent_id and ("agent-4" in name_lower):
+                self.agent_id = aid
+            elif not self.workflow_id and ("workflow" in name_lower or "transaction" in name_lower):
                 self.workflow_id = aid
 
         self._agents_discovered = True
         self._last_discovery = discovered
-        logger.info(f"Discovered Azure Foundry Agents: {discovered}")
         return discovered
 
     def _execute_agent(self, agent_id: str, prompt_content: str) -> Optional[Dict[str, Any]]:
-        """Sends a message to an agent on a dedicated thread and returns its parsed response."""
+        """Invokes the specified Azure AI Foundry agent and returns parsed response."""
+        # 1. Primary Direct Route: Azure AI Foundry REST Execution via API Key
+        if self.api_key and self.endpoint:
+            try:
+                import httpx
+                from urllib.parse import urlparse
+
+                # Resolve agent identifier if it's a GUID alias
+                resolved_id = agent_id
+                if not self._agents_discovered:
+                    self.discover_agents()
+                if agent_id in self._last_discovery:
+                    resolved_id = self._last_discovery[agent_id]
+
+                # Fetch agent instructions and model definition from Foundry Project
+                instructions = ""
+                model = "gpt-5-mini"
+                agent_meta_url = f"{self.endpoint}/agents/{resolved_id}?api-version=v1"
+                try:
+                    r = httpx.get(agent_meta_url, headers={"api-key": self.api_key}, timeout=15.0)
+                    if r.status_code == 200:
+                        data = r.json()
+                        latest = data.get("versions", {}).get("latest", {})
+                        defn = latest.get("definition", {})
+                        instructions = defn.get("instructions", "")
+                        model = defn.get("model") or "gpt-5-mini"
+                except Exception as e:
+                    logger.debug(f"Could not fetch agent metadata for {resolved_id}: {e}")
+
+                # Call Azure AI Foundry model endpoint
+                parsed_endpoint = urlparse(self.endpoint)
+                base_url = f"{parsed_endpoint.scheme}://{parsed_endpoint.netloc}"
+                chat_url = f"{base_url}/models/chat/completions?api-version=2024-05-01-preview"
+
+                messages = []
+                system_prompt = (
+                    (instructions or "You are the Executive Financial Summarizer for Financial Buddy.")
+                    + "\n\nCRITICAL INSTRUCTIONS:\n"
+                    + "1. Return a valid JSON object matching your schema.\n"
+                    + "2. In 'executive_summary.headline', provide a concise 1-sentence verdict.\n"
+                    + "3. In 'executive_summary.key_takeaways', provide distinct, concise bullet items (each focusing on: spending observations, cash flow forecast, liquidity obligations, and actionable next steps).\n"
+                    + "4. Do NOT output raw text outside the JSON."
+                )
+                messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": prompt_content})
+
+                logger.info(f"Invoking Azure AI Foundry agent '{resolved_id}' (model: {model}) at {chat_url}...")
+                resp = httpx.post(
+                    chat_url,
+                    headers={"api-key": self.api_key, "Content-Type": "application/json"},
+                    json={"model": model, "messages": messages},
+                    timeout=60.0
+                )
+                if resp.status_code == 200:
+                    choice = resp.json()["choices"][0]["message"]["content"]
+                    return self._parse_agent_response(choice)
+                else:
+                    logger.error(f"Foundry agent execution failed ({resp.status_code}): {resp.text[:300]}")
+            except Exception as e:
+                logger.error(f"Error calling Azure Foundry REST API for agent {agent_id}: {e}")
+
+        # 2. Fallback: OpenAI Assistants Thread Execution
         client = self.get_client()
         if not client:
             return None
@@ -195,31 +328,80 @@ class FoundryClient:
                     raw_text = msg.content[0].text.value
                     return self._parse_agent_response(raw_text)
         except Exception as e:
-            logger.error(f"Error executing agent {agent_id}: {e}")
+            logger.error(f"Error executing agent {agent_id} via OpenAI client: {e}")
             return None
 
     def _parse_agent_response(self, text: str) -> Dict[str, Any]:
-        """Safely parses agent output, extracting JSON blocks if present or structuring plain text."""
+        """Safely parses agent output, extracting JSON blocks if present or structuring plain text into bullet points."""
         cleaned = self._clean_json_string(text)
+        parsed = None
         try:
-            return json.loads(cleaned)
+            parsed = json.loads(cleaned)
         except Exception:
             # Try finding a JSON object within the text using regex
             import re
             json_match = re.search(r'\{.*\}', cleaned, re.DOTALL)
             if json_match:
                 try:
-                    return json.loads(json_match.group(0))
+                    parsed = json.loads(json_match.group(0))
                 except Exception:
                     pass
-            # Return natural language response gracefully packaged
-            return {
-                "status": "success",
-                "summary": text[:200] + ("..." if len(text) > 200 else ""),
-                "message": text,
-                "understanding": text,
-                "raw_text": text
-            }
+
+        if isinstance(parsed, dict):
+            # Check for Agent-4 executive summary structure
+            if "executive_summary" in parsed and isinstance(parsed["executive_summary"], dict):
+                exec_sum = parsed["executive_summary"]
+                headline = exec_sum.get("headline", "").strip()
+                takeaways = exec_sum.get("key_takeaways", [])
+                
+                bullet_list = []
+                if headline:
+                    clean_head = headline.lstrip("•-* ").strip()
+                    bullet_list.append(f"• **Overview:** {clean_head}")
+                for t in takeaways:
+                    t_str = str(t).strip().lstrip("•-* ").strip()
+                    if t_str:
+                        bullet_list.append(f"• {t_str}")
+                
+                # Check consolidated report if no takeaways
+                consolidated = parsed.get("consolidated_report")
+                if isinstance(consolidated, dict) and not takeaways:
+                    for k, val in consolidated.items():
+                        if val and isinstance(val, str) and val.strip():
+                            clean_v = val.strip().lstrip("•-* ").strip()
+                            label = k.replace("_", " ").title()
+                            bullet_list.append(f"• **{label}:** {clean_v}")
+                
+                # Check action required
+                action_info = parsed.get("action_required")
+                if isinstance(action_info, dict) and action_info.get("action_summary"):
+                    act_text = action_info["action_summary"].strip().lstrip("•-* ").strip()
+                    if act_text and act_text.lower() not in [str(t).lower() for t in takeaways]:
+                        bullet_list.append(f"• **Recommended Action:** {act_text}")
+                
+                formatted_msg = "\n\n".join(bullet_list) if bullet_list else format_as_bullet_points(str(parsed))
+                parsed["message"] = formatted_msg
+                parsed["executive_summary"] = formatted_msg
+            elif "message" in parsed:
+                parsed["message"] = format_as_bullet_points(str(parsed["message"]))
+            elif "summary" in parsed:
+                parsed["message"] = format_as_bullet_points(str(parsed["summary"]))
+            else:
+                parsed["message"] = format_as_bullet_points(text)
+
+            if "financial_health_score" in parsed and isinstance(parsed["financial_health_score"], dict):
+                parsed["health_score"] = parsed["financial_health_score"].get("status", "Healthy")
+            return parsed
+
+        # Return natural language response gracefully packaged as bullet points
+        bullet_msg = format_as_bullet_points(text)
+        return {
+            "status": "success",
+            "summary": text[:200] + ("..." if len(text) > 200 else ""),
+            "message": bullet_msg,
+            "understanding": bullet_msg,
+            "raw_text": text
+        }
 
     def _clean_json_string(self, text: str) -> str:
         text = text.strip()
@@ -229,36 +411,67 @@ class FoundryClient:
             text = text[3:]
         if text.endswith("```"):
             text = text[:-3]
+        text = text.strip()
+        # If output was prefixed with bullet markers e.g. "• {", strip them
+        if "• {" in text or "•  {" in text or text.startswith("•"):
+            import re
+            text = re.sub(r'^[•\-\*]\s*', '', text, flags=re.MULTILINE)
         return text.strip()
 
-    def run_pipeline(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
+    def run_pipeline(self, financial_data: Dict[str, Any], user_query: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes the Financial Buddy workflow:
-        Option 1: If a workflow agent ID is configured, invokes the workflow directly.
-        Option 2: Sequentially chains Agent 1 (Analyzer) -> Agent 2 (Planner) -> Agent 3 (Alert & Action).
-        Option 3: Falls back to verified test data if offline or not logged into Azure.
+        Option 1: If an Agent ID / Workflow ID is configured, invokes the user's Foundry agent directly.
+        Option 2: Sequentially chains Agent 1 (Analyzer) -> Agent 2 (Planner) -> Agent 3 (Alert & Action) -> Agent 4 (Summarizer).
+        Option 3: Falls back to verified test data if offline or credentials not yet provided.
         """
         client = self.get_client()
 
         if client and not self.use_mock_fallback:
             self.discover_agents()
 
-            # Path A: Single Workflow Agent invocation
-            if self.workflow_id:
-                logger.info(f"Invoking Foundry Workflow Agent: {self.workflow_id}")
-                result = self._execute_agent(self.workflow_id, json.dumps(financial_data))
+            # Path A: Single Agent or Workflow Agent invocation
+            target_agent = self.agent_id or self.workflow_id or (self.summarizer_id if not (self.analyzer_id and self.planner_id) else None)
+            if target_agent:
+                logger.info(f"Invoking Foundry Agent: {target_agent}")
+                agent_input = {
+                    "user_query": user_query or "Provide an executive summary of my financial state and any recommendations.",
+                    "financial_context": {
+                        "profile": financial_data.get("profile", {}),
+                        "accounts": financial_data.get("accounts", []),
+                        "budgets": financial_data.get("budgets", []),
+                        "transactions": financial_data.get("transactions", []),
+                        "bills": financial_data.get("bills", []),
+                        "subscriptions": financial_data.get("subscriptions", [])
+                    },
+                    "instructions": "Synthesize the user's financial facts and directly answer their inquiry in a clear, concise, conversational tone."
+                }
+                result = self._execute_agent(target_agent, json.dumps(agent_input))
                 if result:
+                    msg_output = result.get("message") or result.get("executive_summary") or result.get("summary") or result.get("raw_text") or str(result)
+                    analyzer_res = result.get("analyzer", {})
+                    planner_res = result.get("planner", {})
+                    alert_res = result if "agent" in result and result["agent"] == "alert_action" else result.get("alert_action", result)
+                    summarizer_res = result.get("summarizer") or {
+                        "executive_summary": msg_output,
+                        "health_score": result.get("health_score", "Healthy & Stable"),
+                        "key_takeaways": result.get("key_takeaways", []),
+                        "synthesized_from": ["Azure AI Foundry Agent"]
+                    }
                     return {
-                        "execution_mode": "foundry_workflow_agent",
-                        "analyzer": result.get("analyzer", {}),
-                        "planner": result.get("planner", {}),
-                        "alert_action": result if "agent" in result and result["agent"] == "alert_action" else result.get("alert_action", result),
+                        "execution_mode": "foundry_agent",
+                        "agent_id": target_agent,
+                        "message": msg_output,
+                        "analyzer": analyzer_res,
+                        "planner": planner_res,
+                        "alert_action": alert_res,
+                        "summarizer": summarizer_res,
                         "status": "success"
                     }
 
-            # Path B: Sequential Agent Chaining
+            # Path B: Sequential Agent Chaining (4-Agent Pipeline)
             if self.analyzer_id and self.planner_id and self.action_id:
-                logger.info("Executing 3-Agent Sequential Pipeline in Azure AI Foundry...")
+                logger.info("Executing 4-Agent Sequential Pipeline in Azure AI Foundry...")
                 
                 # Step 1: Agent 1 - Financial Analyzer
                 analyzer_input = {
@@ -288,11 +501,28 @@ class FoundryClient:
                         action_res = self._execute_agent(self.action_id, json.dumps(action_input))
 
                         if action_res:
+                            # Step 4: Agent 4 - Financial Summarizer & Synthesizer
+                            summarizer_res = None
+                            if self.summarizer_id:
+                                logger.info(f"Invoking Foundry Agent 4 (Summarizer): {self.summarizer_id}")
+                                summarizer_input = {
+                                    "analyzer_results": analyzer_res,
+                                    "planner_results": planner_res,
+                                    "action_results": action_res,
+                                    "profile": financial_data.get("profile", {}),
+                                    "instructions": "Synthesize the findings of the Financial Analyzer, Financial Planner, and Alert & Action agents into a concise executive financial summary with actionable takeaways and overall health status."
+                                }
+                                summarizer_res = self._execute_agent(self.summarizer_id, json.dumps(summarizer_input))
+                            
+                            if not summarizer_res:
+                                summarizer_res = self._generate_simulated_summary(analyzer_res, planner_res, action_res, financial_data)
+
                             return {
                                 "execution_mode": "foundry_live_chain",
                                 "analyzer": analyzer_res,
                                 "planner": planner_res,
                                 "alert_action": action_res,
+                                "summarizer": summarizer_res,
                                 "status": "success"
                             }
 
@@ -310,31 +540,26 @@ class FoundryClient:
         if accounts:
             curr_bal = sum(float(a.get("balance", 0)) for a in accounts)
         else:
-            curr_bal = float(profile.get("current_balance", 120000))
+            curr_bal = float(profile.get("current_balance", 0.0))
 
         bills_list = financial_data.get("bills", [])
         if bills_list:
             bills_amt = sum(float(b.get("amount", 0)) for b in bills_list if b.get("status") != "paid")
         else:
-            bills_amt = float(profile.get("upcoming_bills", 5000))
+            bills_amt = float(profile.get("upcoming_bills", 0.0))
 
-        income = float(profile.get("monthly_income", 60000))
-        expenses = float(profile.get("monthly_expenses", 30000))
+        income = float(profile.get("monthly_income", 0.0))
+        expenses = float(profile.get("monthly_expenses", 0.0))
         surplus = max(0.0, income - expenses)
-        curr_savings = float(profile.get("current_savings", 80000))
-        savings_goal = float(profile.get("savings_goal", 200000))
+        curr_savings = float(profile.get("current_savings", 0.0))
+        savings_goal = float(profile.get("savings_goal", 0.0))
         
-        planned_purchase = profile.get("planned_purchase") or {"item": "Laptop", "amount": 50000}
-        item_name = planned_purchase.get("item", "Laptop")
-        purchase_amt = float(planned_purchase.get("amount", 50000))
+        planned_purchase = profile.get("planned_purchase") or {"item": "", "amount": 0.0}
+        item_name = planned_purchase.get("item", "Planned Purchase")
+        purchase_amt = float(planned_purchase.get("amount", 0.0))
 
         raw_txs = financial_data.get("transactions", [])
-        budgets_config = financial_data.get("budgets", [
-            {"category": "Food", "amount": 10000},
-            {"category": "Transport", "amount": 5000},
-            {"category": "Shopping", "amount": 8000},
-            {"category": "Entertainment", "amount": 3000}
-        ])
+        budgets_config = financial_data.get("budgets", [])
 
         # -------------------------------------------------------------
         # 1. Agent 1 Simulation: Categorization & Budget Analysis
@@ -550,10 +775,105 @@ class FoundryClient:
             }
         }
 
+        # -------------------------------------------------------------
+        # 4. Agent 4 Simulation: Executive Financial Summarizer / Synthesis Agent
+        # -------------------------------------------------------------
+        summarizer_output = self._generate_simulated_summary(
+            analyzer=analyzer_output,
+            planner=planner_output,
+            alert_action=action_output,
+            financial_data=financial_data
+        )
+
         return {
             "execution_mode": "dynamic_simulation",
             "analyzer": analyzer_output,
             "planner": planner_output,
             "alert_action": action_output,
+            "summarizer": summarizer_output,
             "status": "success"
+        }
+
+    def _generate_simulated_summary(
+        self,
+        analyzer: Dict[str, Any],
+        planner: Dict[str, Any],
+        alert_action: Dict[str, Any],
+        financial_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Synthesizes the collective outputs of Agent 1, Agent 2, and Agent 3
+        into a unified, actionable executive financial briefing and guidance.
+        """
+        profile = financial_data.get("profile", {})
+        accounts = financial_data.get("accounts", [])
+        if accounts:
+            curr_bal = sum(float(a.get("balance", 0)) for a in accounts)
+        else:
+            curr_bal = float(profile.get("current_balance", 0.0))
+
+        income = float(profile.get("monthly_income", 0.0))
+        expenses = float(profile.get("monthly_expenses", 0.0))
+        surplus = max(0.0, income - expenses)
+
+        affordability = planner.get("affordability_analysis", {})
+        item_name = affordability.get("item", "Planned Purchase")
+        cost = float(affordability.get("cost", 0.0))
+        is_affordable = affordability.get("affordable", True)
+
+        alerts = alert_action.get("alerts", [])
+        budgets_analysis = analyzer.get("budget_analysis", [])
+        exceeded_budgets = [b["budget_name"] for b in budgets_analysis if b.get("percentage_used", 0) >= 100]
+        warning_budgets = [b["budget_name"] for b in budgets_analysis if 75 <= b.get("percentage_used", 0) < 100]
+
+        has_danger_alerts = any(a.get("level") == "danger" for a in alerts)
+
+        # Determine overall financial health status
+        if has_danger_alerts or (not is_affordable and cost > 0):
+            health_score = "Caution Advised"
+            health_badge = "badge-danger"
+        elif exceeded_budgets or len(warning_budgets) > 1:
+            health_score = "Moderate Attention Needed"
+            health_badge = "badge-warning"
+        elif surplus > 0 and curr_bal > expenses:
+            health_score = "Healthy & Stable"
+            health_badge = "badge-success"
+        else:
+            health_score = "Balanced"
+            health_badge = "badge-accent"
+
+        # Construct key takeaways
+        takeaways = []
+        takeaways.append(f"Current Liquidity: ₹{curr_bal:,.0f} with a net monthly cash surplus of ₹{surplus:,.0f}/mo.")
+        
+        if exceeded_budgets:
+            takeaways.append(f"Budget Limit Overrun: {', '.join(exceeded_budgets)} has exceeded the monthly threshold.")
+        elif warning_budgets:
+            takeaways.append(f"Budget Utilization: {', '.join(warning_budgets)} is approaching maximum limit.")
+        else:
+            takeaways.append("Spending Stability: Discretionary expenses remain within planned category allocations.")
+
+        if cost > 0:
+            status_text = "Affordable with comfortable buffer" if is_affordable else "Poses liquidity risk without pre-reservation"
+            takeaways.append(f"Purchase Feasibility ({item_name} @ ₹{cost:,.0f}): {status_text}.")
+
+        if alerts:
+            takeaways.append(f"Active Safeguards: {len(alerts)} active safety alert{'s' if len(alerts) > 1 else ''} being monitored.")
+
+        exec_summary = (
+            f"**Overall Financial Health:** {health_score}. "
+            f"Your liquid balance is **₹{curr_bal:,.0f}** with an estimated monthly surplus of **+₹{surplus:,.0f}**. "
+            f"{('Discretionary purchase of ' + item_name + ' (₹' + f'{cost:,.0f}' + ') is feasible with existing cash reserves.' if is_affordable else 'Recommended to defer discretionary purchase of ' + item_name + ' until upcoming obligations are reserved.') if cost > 0 else 'Your overall cash flow supports ongoing emergency reserve building.'} "
+            f"Based on comprehensive cash flow analysis, budget utilization, and scheduled obligations."
+        )
+
+        return {
+            "agent": "financial_summarizer",
+            "stage": "4",
+            "status": "success",
+            "health_score": health_score,
+            "health_badge": health_badge,
+            "executive_summary": exec_summary,
+            "key_takeaways": takeaways,
+            "synthesized_from": ["financial_analyzer", "financial_planner", "alert_action"]
         }
