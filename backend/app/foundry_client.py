@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Union, Tuple
 
 logger = logging.getLogger("financial_buddy.foundry")
 

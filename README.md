@@ -51,6 +51,10 @@ MoneyArnold/
 │   ├── style.css               # Clean responsive styling
 │   └── app.js                  # Frontend controller & API bridge
 │
+├── run.sh                  # 1-Command startup script for macOS & Linux
+├── run.bat                 # 1-Click startup script for Windows (Command Prompt)
+├── run.ps1                 # PowerShell startup script for Windows
+├── requirements.txt        # Top-level Python dependencies
 ├── .gitignore
 └── README.md
 ```
@@ -61,12 +65,31 @@ MoneyArnold/
 
 ### 1. Prerequisites
 - **Python 3.10+** (Python 3.11 or 3.12 recommended)
+  - **macOS:** Install via Homebrew: `brew install python@3.11` (or download from [python.org](https://www.python.org/downloads/))
+  - **Windows:** Download from [python.org](https://www.python.org/downloads/) (check "Add Python to PATH")
 - An active Azure AI Foundry Project (`MoneyArnold-01`) or API Key (configured in `backend/.env`)
 
 ---
 
-### 2. Fastest 1-Click Start (Windows)
-Simply double-click:
+### 2. Fastest 1-Command Start
+
+#### 🍎 On macOS / Linux
+Open Terminal in the project root and run:
+```bash
+./run.sh
+```
+> **Tip:** If needed, ensure the script is executable first: `chmod +x run.sh`.
+> The script automatically:
+> - Detects `python3`
+> - Activates or creates `.venv`
+> - Installs all requirements if not yet installed
+> - Copies `backend/.env.example` to `backend/.env` if missing
+> - Launches the FastAPI server with live reload on port 8000!
+
+*(Optional: Run on another port if port 8000 is occupied: `PORT=8080 ./run.sh`)*
+
+#### 🪟 On Windows
+Double-click:
 ```text
 run.bat
 ```
@@ -74,25 +97,39 @@ or in PowerShell:
 ```powershell
 .\run.ps1
 ```
-This automatically activates your virtual environment, launches the FastAPI server, connects to Azure AI Foundry, and hosts the frontend!
 
 ---
 
 ### 3. Manual Terminal Startup
 
+#### 🍎 On macOS / Linux:
 ```bash
-# 1. Navigate to the backend directory
-cd backend
+# 1. Create and activate a virtual environment (first time only)
+python3 -m venv .venv
+source .venv/bin/activate
 
-# 2. Activate your virtual environment (if using one)
-# On Windows:
-..\.venv\Scripts\activate
-# (or if you have venv inside backend: venv\Scripts\activate)
-
-# 3. Install dependencies (first time only)
+# 2. Install dependencies (first time only)
 pip install -r requirements.txt
 
-# 4. Start the server
+# 3. Configure environment (if not already done)
+if [ ! -f backend/.env ]; then cp backend/.env.example backend/.env; fi
+
+# 4. Navigate to backend and launch FastAPI
+cd backend
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+#### 🪟 On Windows:
+```powershell
+# 1. Create and activate a virtual environment (first time only)
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Navigate to backend and launch FastAPI
+cd backend
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
