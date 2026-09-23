@@ -1182,6 +1182,7 @@ button, input, select, textarea {
 .table-responsive {
   width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .fintech-table {
@@ -1189,6 +1190,7 @@ button, input, select, textarea {
   border-collapse: collapse;
   text-align: left;
   font-size: 13px;
+  min-width: 640px;
 }
 
 .fintech-table th {
@@ -1199,12 +1201,14 @@ button, input, select, textarea {
   text-transform: uppercase;
   letter-spacing: 0.6px;
   border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
 }
 
 .fintech-table td {
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-subtle);
   color: var(--text-secondary);
+  vertical-align: middle;
 }
 
 .fintech-table tr:hover td {
@@ -1212,17 +1216,22 @@ button, input, select, textarea {
   color: var(--text-primary);
 }
 
-.tx-merchant-col {
-  font-weight: 600;
-  color: var(--text-primary);
+/* Inner wrapper for merchant cell — flex lives here, NOT on <td> */
+.tx-merchant-inner {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.tx-merchant-col {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .tx-amount-col {
   font-weight: 700;
   text-align: right;
+  white-space: nowrap;
 }
 
 .amount-expense { color: var(--text-primary); }
@@ -1400,6 +1409,13 @@ button, input, select, textarea {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Green accent for add_transaction / update_budget AI confirmations */
+.execute-action-card {
+  border-left-color: var(--success);
+  background: color-mix(in srgb, var(--success) 6%, var(--bg-card));
 }
 
 .chat-action-info {
@@ -1428,6 +1444,50 @@ button, input, select, textarea {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* Urgent Red Recommendation Alert in Chat Bubble */
+.chat-recommendation-alert {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-left: 4px solid #ef4444;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+}
+
+.chat-rec-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chat-rec-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.chat-rec-label {
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #f87171;
+}
+
+.chat-rec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.chat-rec-item {
+  display: block;
+  font-size: 12.5px;
+  color: #fca5a5;
+  line-height: 1.5;
 }
 
 /* Structured AI Response Cards */

@@ -290,7 +290,8 @@
           <div class="form-group">
             <label for="tx-form-category">Category</label>
             <select id="tx-form-category">
-              <option value="Food">Food & Dining</option>
+              <option value="auto">🤖 Auto / AI Guess</option>
+              <option value="Food">Food &amp; Dining</option>
               <option value="Shopping">Shopping</option>
               <option value="Transport">Transportation</option>
               <option value="Entertainment">Entertainment</option>
@@ -572,7 +573,15 @@
   <!-- ============================================================== -->
   <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Application Controller Scripts -->
-  <script src="app.js?v=setup-fix-2"></script>
+  <!-- Application Controller Scripts (Modularized Architecture) -->
+  <script src="js/state.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/modals.js"></script>
+  <script src="js/pages.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -125,6 +125,7 @@ class ProposedAction(BaseModel):
     why: str
     expected_impact: str
     status: str = "pending_confirmation"
+    payload: Optional[Dict[str, Any]] = None  # carries transaction/budget data for execute_action intents
 
 class AIChatRequest(BaseModel):
     message: str
@@ -151,3 +152,8 @@ class AIChatResponse(BaseModel):
     agent_contributions: List[AgentContribution] = []
     summarizer: Optional[Dict[str, Any]] = None
     raw_workflow_result: Optional[Dict[str, Any]] = None
+
+class ExecuteActionRequest(BaseModel):
+    action_type: str  # "add_transaction", "update_budget", "add_budget"
+    payload: Dict[str, Any]  # the actual transaction/budget data to save
+

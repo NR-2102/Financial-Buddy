@@ -12,14 +12,14 @@
     },
     "currency": "\u20b9",
     "user_name": "Demo User",
-    "user_email": "demo@financialbuddy.ai"
+    "user_email": "demo@gmail.com"
   },
   "accounts": [
     {
       "id": "acc-1",
       "name": "HDFC Salary Account",
       "type": "Bank",
-      "balance": 59899.9,
+      "balance": 75000.0,
       "masked_number": "\u2022\u2022\u2022\u2022 4892"
     },
     {
@@ -33,7 +33,7 @@
       "id": "acc-3",
       "name": "Physical Cash Wallet",
       "type": "Cash",
-      "balance": 9750.0,
+      "balance": 10000.0,
       "masked_number": "Cash in Hand"
     },
     {
@@ -72,39 +72,6 @@
     }
   ],
   "transactions": [
-    {
-      "id": "tx-13",
-      "merchant": "gasti",
-      "amount": 250.0,
-      "category": "Other",
-      "confidence": "high",
-      "date": "2026-09-22",
-      "type": "expense",
-      "account": "Physical Cash Wallet",
-      "notes": "njara aagya"
-    },
-    {
-      "id": "tx-12",
-      "merchant": "flipkart",
-      "amount": 5000.0,
-      "category": "Shopping",
-      "confidence": "high",
-      "date": "2026-09-22",
-      "type": "expense",
-      "account": "HDFC Salary Account",
-      "notes": ""
-    },
-    {
-      "id": "tx-11",
-      "merchant": "swiggy",
-      "amount": 10000.0,
-      "category": "Food",
-      "confidence": "high",
-      "date": "2026-09-22",
-      "type": "expense",
-      "account": "HDFC Salary Account",
-      "notes": ""
-    },
     {
       "id": "tx-1",
       "merchant": "Swiggy Food Delivery",
@@ -312,40 +279,12 @@
   ],
   "alerts": [
     {
-      "id": "alert-budget-food",
-      "level": "danger",
-      "title": "Food Budget Exceeded (144%)",
-      "message": "You have spent \u20b914,350 of your \u20b910,000 Food budget. Discretionary limit has been exceeded by \u20b94,350.",
-      "status": "active",
-      "created_at": "2026-09-22T08:44:28.167509+00:00",
-      "meta": {
-        "pct": 144,
-        "category": "Food",
-        "spent": 14350.0,
-        "limit": 10000.0
-      }
-    },
-    {
-      "id": "alert-budget-shopping",
-      "level": "danger",
-      "title": "Shopping Budget Exceeded (138%)",
-      "message": "You have spent \u20b911,000 of your \u20b98,000 Shopping budget. Discretionary limit has been exceeded by \u20b93,000.",
-      "status": "active",
-      "created_at": "2026-09-22T09:13:27.741365+00:00",
-      "meta": {
-        "pct": 138,
-        "category": "Shopping",
-        "spent": 11000.0,
-        "limit": 8000.0
-      }
-    },
-    {
       "id": "alert-upcoming-bills",
       "level": "info",
       "title": "Upcoming Bills Due Soon",
       "message": "\u20b919,999 in scheduled obligations due soon. Reserve funds to ensure smooth settlement.",
       "status": "active",
-      "created_at": "2026-09-22T08:24:04.132562+00:00"
+      "created_at": "2026-09-23T03:38:18.985608+00:00"
     },
     {
       "id": "al-1",
@@ -372,7 +311,12 @@
       "timestamp": "2026-09-21T09:00:00Z"
     }
   ],
-  "pending_action": null,
+  "pending_action": {
+    "type": "reserve_bill_funds",
+    "description": "Reserve \u20b919,999 from main balance to safeguard upcoming bills.",
+    "amount": 19999.0,
+    "status": "pending_confirmation"
+  },
   "action_history": [
     {
       "type": "reserve_bill_funds",
@@ -382,12 +326,6 @@
       "previous_balance": 125000.0,
       "new_balance": 120000.0,
       "timestamp": "2026-09-15T14:22:00Z"
-    },
-    {
-      "type": "reserve_bill_funds",
-      "status": "cancelled_by_user",
-      "amount": 19999.0,
-      "description": "Reserve \u20b919,999 from main balance to safeguard upcoming bills."
     }
   ]
 }

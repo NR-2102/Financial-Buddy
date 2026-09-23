@@ -26,7 +26,8 @@ from app.models import (
     AIChatResponse,
     AgentContribution,
     WhatIfComparison,
-    ProposedAction
+    ProposedAction,
+    ExecuteActionRequest
 )
 from app.foundry_client import FoundryClient, format_as_bullet_points
 
@@ -40,7 +41,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("financial_buddy.api")
 
 app = FastAPI(
-    title="Financial Buddy API",
+    title="Money Arnold API",
     description="AI Financial Assistant backend connecting to Microsoft Azure AI Foundry",
     version="2.0.0"
 )
@@ -397,7 +398,7 @@ def evaluate_dynamic_alerts(data: dict) -> dict:
 def health_check():
     return {
         "status": "healthy",
-        "service": "Financial Buddy API",
+        "service": "Money Arnold API",
         "foundry_endpoint": foundry_client.endpoint,
         "mock_fallback_enabled": foundry_client.use_mock_fallback
     }
@@ -442,11 +443,15 @@ def auth_login(req: UserAuthRequest):
     
     is_demo = req.email.lower() in ["demo@gmail.com", "demouser@gmail.com", "demo@financialbuddy.ai"]
     if is_demo:
-        seed_data = get_demo_seed_data()
-        seed_data["profile"]["user_name"] = "Demo User"
-        seed_data["profile"]["user_email"] = req.email.lower()
-        seed_data = evaluate_dynamic_alerts(seed_data)
-        save_stored_data(seed_data)
+        # Only seed if no real data has been saved yet (preserves user changes)
+        existing = load_stored_data() if DATA_FILE.exists() else None
+        has_data = existing and len(existing.get("accounts", [])) > 0
+        if not has_data:
+            seed_data = get_demo_seed_data()
+            seed_data["profile"]["user_name"] = "Demo User"
+            seed_data["profile"]["user_email"] = req.email.lower()
+            seed_data = evaluate_dynamic_alerts(seed_data)
+            save_stored_data(seed_data)
 
     current_user = {
         "email": req.email,
@@ -993,9 +998,185 @@ def confirm_mock_action(req: ActionConfirmationRequest):
         )
 
 # -------------------------------------------------------------
-# Conversational AI Assistant (Routes to 3-Agent Workflow)
+# AI Auto-Categorize & Execute Action Endpoints
 # -------------------------------------------------------------
 
+@app.post("/api/ai/categorize")
+def ai_categorize_endpoint(body: Dict[str, Any]):
+    """
+    Auto-categorizes a transaction based on merchant name using Agent 1's
+    keyword-matching logic. Returns {category, confidence}.
+    """
+    merchant = str(body.get("merchant", "")).lower()
+    category = "Other"
+    confidence = "medium"
+
+    if any(k in merchant for k in ["swiggy", "zomato", "restaurant", "cafe", "food", "grocer", "mcdonald", "blinkit", "dunzo"]):
+        category = "Food"
+        confidence = "high"
+    elif any(k in merchant for k in ["uber", "ola", "metro", "fuel", "petrol", "transport", "train", "bus", "rapido", "namma"]):
+        category = "Transport"
+        confidence = "high"
+    elif any(k in merchant for k in ["amazon", "flipkart", "myntra", "shopping", "clothes", "book", "nykaa", "meesho"]):
+        category = "Shopping"
+        confidence = "medium"
+    elif any(k in merchant for k in ["netflix", "spotify", "prime", "movie", "hotstar", "cinema", "youtube", "jio"]):
+        category = "Entertainment"
+        confidence = "high"
+    elif any(k in merchant for k in ["electricity", "power", "water", "wifi", "bill", "recharge", "utility", "airtel", "bsnl", "broadband"]):
+        category = "Bills"
+        confidence = "high"
+    elif any(k in merchant for k in ["hospital", "pharmacy", "doctor", "clinic", "medicine", "health", "apollo"]):
+        category = "Healthcare"
+        confidence = "high"
+    elif any(k in merchant for k in ["school", "college", "course", "tuition", "education", "udemy", "coursera"]):
+        category = "Education"
+        confidence = "high"
+    elif any(k in merchant for k in ["salary", "income", "consulting", "payout", "freelance", "retainer", "dividend"]):
+        category = "Income"
+        confidence = "high"
+
+    return {"category": category, "confidence": confidence}
+
+
+@app.post("/api/action/execute")
+def execute_crud_action(req: ExecuteActionRequest):
+    """
+    Executes a real CRUD action (add_transaction, update_budget, add_budget)
+    that the user has confirmed via the AI chat UI.
+    """
+    data = load_stored_data()
+    payload = req.payload or {}
+
+    if req.action_type == "add_transaction":
+        tx_dict = {
+            "id": f"tx-{len(data.get('transactions', [])) + 1}-ai",
+            "merchant": payload.get("merchant", "AI Added"),
+            "amount": float(payload.get("amount", 0)),
+            "category": payload.get("category", "Other"),
+            "confidence": "high",
+            "date": payload.get("date") or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "type": payload.get("type", "expense"),
+            "account": payload.get("account") or (data.get("accounts", [{}])[0].get("name", "Primary Checking") if data.get("accounts") else "Primary Checking"),
+            "notes": payload.get("notes") or "Added via AI Assistant"
+        }
+        # Adjust account balance
+        tx_amt = float(tx_dict["amount"])
+        is_income = tx_dict["type"] == "income"
+        account_name = tx_dict["account"]
+        for acc in data.get("accounts", []):
+            if acc.get("name") == account_name:
+                if is_income:
+                    acc["balance"] = float(acc.get("balance", 0)) + tx_amt
+                else:
+                    acc["balance"] = float(acc.get("balance", 0)) - tx_amt
+                break
+        data["transactions"].insert(0, tx_dict)
+        data = evaluate_dynamic_alerts(data)
+        save_stored_data(data)
+        return {
+            "status": "success",
+            "message": f"✅ Transaction added: {tx_dict['merchant']} — ₹{tx_amt:,.0f} ({tx_dict['category']}).",
+            "transaction": tx_dict
+        }
+
+    elif req.action_type in ("update_budget", "add_budget"):
+        category = payload.get("category", "")
+        amount = float(payload.get("amount", 0))
+        budgets = data.get("budgets", [])
+        found = False
+        for i, b in enumerate(budgets):
+            if b.get("category", "").lower() == category.lower():
+                budgets[i]["amount"] = amount
+                found = True
+                break
+        if not found:
+            budgets.append({"id": f"b-{len(budgets) + 1}-ai", "category": category, "amount": amount})
+        data["budgets"] = budgets
+        data = evaluate_dynamic_alerts(data)
+        save_stored_data(data)
+        action_word = "updated" if found else "created"
+        return {
+            "status": "success",
+            "message": f"✅ {category} budget {action_word} to ₹{amount:,.0f}.",
+            "budgets": data["budgets"]
+        }
+
+    elif req.action_type == "update_balance":
+        # Add/subtract from the first (primary) account balance
+        amount = float(payload.get("amount", 0))
+        operation = payload.get("operation", "add")  # "add" or "set"
+        accounts = data.get("accounts", [])
+        if not accounts:
+            raise HTTPException(status_code=400, detail="No accounts found to update.")
+        old_bal = float(accounts[0].get("balance", 0))
+        if operation == "set":
+            new_bal = amount
+        elif operation == "subtract":
+            new_bal = old_bal - amount
+        else:  # add
+            new_bal = old_bal + amount
+        accounts[0]["balance"] = new_bal
+        data["accounts"] = accounts
+        # Also update profile current_balance to sum of liquid accounts
+        data["profile"]["current_balance"] = sum(float(a.get("balance", 0)) for a in accounts if a.get("type") != "Credit Card")
+        data = evaluate_dynamic_alerts(data)
+        save_stored_data(data)
+        op_word = "set to" if operation == "set" else ("increased by" if operation == "add" else "decreased by")
+        return {
+            "status": "success",
+            "message": f"✅ {accounts[0].get('name', 'Primary account')} balance {op_word} ₹{amount:,.0f}. New balance: ₹{new_bal:,.0f}.",
+            "accounts": data["accounts"]
+        }
+
+    elif req.action_type == "update_savings":
+        amount = float(payload.get("amount", 0))
+        operation = payload.get("operation", "set")
+        old_sav = float(data["profile"].get("current_savings", 0))
+        if operation == "add":
+            new_sav = old_sav + amount
+        elif operation == "subtract":
+            new_sav = max(0, old_sav - amount)
+        else:
+            new_sav = amount
+        data["profile"]["current_savings"] = new_sav
+        data = evaluate_dynamic_alerts(data)
+        save_stored_data(data)
+        return {
+            "status": "success",
+            "message": f"✅ Emergency savings updated to ₹{new_sav:,.0f}.",
+            "profile": data["profile"]
+        }
+
+    elif req.action_type == "update_goal":
+        field = payload.get("field", "savings_goal")  # savings_goal, monthly_income, monthly_expenses
+        amount = float(payload.get("amount", 0))
+        data["profile"][field] = amount
+        if field == "savings_goal" and data.get("goals"):
+            for g in data["goals"]:
+                if "emergency" in g.get("name", "").lower():
+                    g["target_amount"] = amount
+                    break
+        data = evaluate_dynamic_alerts(data)
+        save_stored_data(data)
+        label_map = {
+            "savings_goal": "Savings Goal",
+            "monthly_income": "Monthly Income",
+            "monthly_expenses": "Monthly Expenses"
+        }
+        return {
+            "status": "success",
+            "message": f"✅ {label_map.get(field, field)} updated to ₹{amount:,.0f}.",
+            "profile": data["profile"]
+        }
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action_type: {req.action_type}")
+
+
+# -------------------------------------------------------------
+# Conversational AI Assistant (Routes to 3-Agent Workflow)
+# -------------------------------------------------------------
 @app.post("/api/ai/chat", response_model=AIChatResponse)
 def conversational_ai_chat(req: AIChatRequest):
     """
@@ -1032,15 +1213,35 @@ def conversational_ai_chat(req: AIChatRequest):
             detected_item = kw.title()
             break
 
-    # Check current message for amount
-    amt_match = re.search(r'(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d+)?)', msg, re.IGNORECASE)
-    if amt_match:
+    # Check current message for amount: prioritize explicit currency, then action amounts, then general numbers
+    curr_amt_match = re.search(r'(?:₹|rs\.?|inr)\s*(\d+(?:,\d+)*(?:\.\d+)?)', msg, re.IGNORECASE)
+    if curr_amt_match:
         try:
-            val = float(amt_match.group(1).replace(",", ""))
-            if val > 100:
+            val = float(curr_amt_match.group(1).replace(",", ""))
+            if val > 0:
                 detected_amount = val
         except ValueError:
             pass
+
+    if not detected_amount:
+        act_amt_match = re.search(r'(?:add|plus|deposit|set|update|by|to|for|of|spent|paid|increase|decrease)\s+(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d+)?)', msg, re.IGNORECASE)
+        if act_amt_match:
+            try:
+                val = float(act_amt_match.group(1).replace(",", ""))
+                if val > 0:
+                    detected_amount = val
+            except ValueError:
+                pass
+
+    if not detected_amount:
+        amt_match = re.search(r'(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d+)?)', msg, re.IGNORECASE)
+        if amt_match:
+            try:
+                val = float(amt_match.group(1).replace(",", ""))
+                if val > 0:
+                    detected_amount = val
+            except ValueError:
+                pass
 
     # If item or amount not found in current message, look back in conversation history
     if not detected_item or not detected_amount:
@@ -1056,7 +1257,7 @@ def conversational_ai_chat(req: AIChatRequest):
                 if prev_amt:
                     try:
                         val = float(prev_amt.group(1).replace(",", ""))
-                        if val > 100:
+                        if val > 0:
                             detected_amount = val
                     except ValueError:
                         pass
@@ -1066,7 +1267,58 @@ def conversational_ai_chat(req: AIChatRequest):
     # 2. Determine Query Intent
     intent = req.intent
     if not intent:
-        if req.alert_context or any(w in msg_lower for w in ["alert", "warning", "why did i get", "explain this alert"]):
+        # Check for execute_action FIRST (before other intents, since these messages are very specific)
+        execute_keywords = [
+            "add a", "add an", "record a", "record an", "log a", "log an",
+            "i spent", "i paid", "just paid", "just spent",
+            "set my", "set the", "update my", "update the", "increase my", "decrease my",
+            "create a budget", "set budget", "change budget", "update budget",
+            "to my balance", "to balance", "from my balance", "from balance",
+            "add to balance", "add to my balance", "add to account", "add 5000", "add ₹",
+            "set balance", "update balance", "change balance",
+            "set savings", "update savings", "my savings", "emergency fund",
+            "set goal", "update goal", "my goal", "savings goal",
+            "set income", "update income",
+            "set expenses", "update expenses"
+        ]
+        is_balance_action = (
+            any(p in msg_lower for p in ["to my balance", "to balance", "from my balance", "from balance", "set balance", "update balance", "my balance", "add to balance", "add to my balance"]) or
+            (("balance" in msg_lower or "account" in msg_lower) and any(w in msg_lower for w in ["add", "deposit", "set", "update", "change", "increase", "decrease", "subtract", "deduct", "remove", "put", "top up"]))
+        )
+        is_savings_action = (
+            ("saving" in msg_lower or "emergency fund" in msg_lower) and
+            any(w in msg_lower for w in ["set", "update", "change", "add", "increase", "decrease", "make", "put", "deposit"])
+        )
+        # IMPORTANT: A read-only question such as "What is my income?"
+        # must NOT become an execute_action. Only explicit modification
+        # language should trigger a write action.
+        is_goal_action = (
+            (
+                "goal" in msg_lower
+                and any(w in msg_lower for w in [
+                    "set", "update", "change", "increase", "decrease",
+                    "add", "make", "create"
+                ])
+            )
+            or
+            (
+                "income" in msg_lower
+                and any(w in msg_lower for w in [
+                    "set", "update", "change", "increase", "decrease"
+                ])
+            )
+            or
+            (
+                "expense" in msg_lower
+                and any(w in msg_lower for w in [
+                    "set", "update", "change", "increase", "decrease"
+                ])
+            )
+        )
+
+        if any(kw in msg_lower for kw in execute_keywords) or is_balance_action or is_savings_action or is_goal_action:
+            intent = "execute_action"
+        elif req.alert_context or any(w in msg_lower for w in ["alert", "warning", "why did i get", "explain this alert"]):
             intent = "alert_explanation"
         elif any(w in msg_lower for w in ["what if", "what happens if", "next month", "spend more", "save less", "less next month"]):
             intent = "what_if_analysis"
@@ -1085,7 +1337,244 @@ def conversational_ai_chat(req: AIChatRequest):
         else:
             intent = "general"
 
-    # 3. Prepare Context & Run Existing 3-Agent Foundry Workflow
+    # Fast-Path for Direct Action Intents (add transaction, update balance, savings, goal, budget)
+    # Responds immediately without running analytical pipeline.
+    #
+    # Safety guard: common read-only questions must never be converted into
+    # financial write actions.
+    read_only_patterns = [
+        r"^what(?:'s| is)\s+my\s+(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
+        r"^tell me\s+(?:my\s+)?(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
+        r"^how much\s+(?:is|are)\s+my\s+(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
+        r"^how much\s+do\s+i\s+(?:earn|make)\s*\??$"
+    ]
+    if intent == "execute_action" and any(re.search(p, msg_lower) for p in read_only_patterns):
+        intent = "general"
+
+    if intent == "execute_action":
+        amount_guess = detected_amount or 0.0
+        if not amount_guess or amount_guess == 0.0:
+            found_num = re.search(r'(?:₹|rs\.?|inr)?\s*(\d+(?:,\d+)*(?:\.\d+)?)', msg, re.IGNORECASE)
+            if found_num:
+                try:
+                    amount_guess = float(found_num.group(1).replace(",", ""))
+                except ValueError:
+                    amount_guess = 5000.0
+            else:
+                amount_guess = 0.0
+
+        # Never invent an amount for a financial write operation.
+        # If the user explicitly asked to modify something but omitted
+        # the amount, return a clarification response instead.
+        if amount_guess <= 0:
+            return AIChatResponse(
+                message="Please provide the amount you want me to change.",
+                intent=intent,
+                summary="A financial update was requested, but no amount was provided.",
+                understanding="I detected a request to modify your financial records, but I could not find a valid amount.",
+                why_it_matters="I will not invent an amount for a financial transaction or account update.",
+                forecast="No financial data was changed.",
+                what_if=None,
+                recommendations=[],
+                recommendation="",
+                alerts=[],
+                action=None,
+                requires_confirmation=False,
+                agent_contributions=[
+                    AgentContribution(
+                        agent="Financial Analyzer (Agent 1)",
+                        stage="1",
+                        observation="Write intent detected, but no amount was supplied."
+                    )
+                ],
+                summarizer={},
+                raw_workflow_result={}
+            )
+
+        # Sub-action detection
+        is_balance_action = (
+            any(p in msg_lower for p in ["to my balance", "to balance", "from my balance", "from balance", "set balance", "update balance", "my balance to", "add to balance", "add to my balance", "in my balance", "into balance"]) or
+            (("balance" in msg_lower or "account" in msg_lower) and any(w in msg_lower for w in ["add", "deposit", "set", "update", "change", "increase", "decrease", "subtract", "deduct", "remove", "put", "top up"]))
+        )
+
+        is_savings_action = (
+            ("saving" in msg_lower or "emergency fund" in msg_lower) and
+            any(w in msg_lower for w in ["set", "update", "change", "add", "increase", "decrease", "make", "put", "deposit"]) and
+            not ("goal" in msg_lower)
+        )
+
+        # Only explicit write language can reach update_goal.
+        is_goal_action = (
+            (
+                "goal" in msg_lower
+                and any(w in msg_lower for w in [
+                    "set", "update", "change", "increase", "decrease",
+                    "add", "make", "create"
+                ])
+            )
+            or
+            (
+                "income" in msg_lower
+                and any(w in msg_lower for w in [
+                    "set", "update", "change", "increase", "decrease"
+                ])
+            )
+            or
+            (
+                "expense" in msg_lower
+                and any(w in msg_lower for w in [
+                    "set", "update", "change", "increase", "decrease"
+                ])
+            )
+        )
+
+        is_budget_action = (
+            "budget" in msg_lower and
+            any(w in msg_lower for w in ["set", "update", "change", "create", "increase", "decrease", "make", "limit"])
+        )
+
+        if is_balance_action:
+            action_type_detected = "update_balance"
+            operation = "subtract" if any(w in msg_lower for w in ["subtract", "deduct", "remove", "take", "minus"]) else \
+                        "set" if any(w in msg_lower for w in ["set", "change to", "make my balance", "is now"]) and not any(w in msg_lower for w in ["add", "deposit", "increase"]) else "add"
+            action_payload = {"amount": amount_guess, "operation": operation}
+            if operation == "add":
+                action_desc = f"Add ₹{amount_guess:,.0f} to primary account balance"
+            elif operation == "subtract":
+                action_desc = f"Deduct ₹{amount_guess:,.0f} from primary account balance"
+            else:
+                action_desc = f"Set primary account balance to ₹{amount_guess:,.0f}"
+
+        elif is_savings_action:
+            action_type_detected = "update_savings"
+            operation = "add" if any(w in msg_lower for w in ["add", "increase", "deposit"]) else \
+                        "subtract" if any(w in msg_lower for w in ["subtract", "deduct", "remove"]) else "set"
+            action_payload = {"amount": amount_guess, "operation": operation}
+            if operation == "add":
+                action_desc = f"Add ₹{amount_guess:,.0f} to emergency savings"
+            elif operation == "subtract":
+                action_desc = f"Deduct ₹{amount_guess:,.0f} from emergency savings"
+            else:
+                action_desc = f"Set emergency savings to ₹{amount_guess:,.0f}"
+
+        elif is_goal_action:
+            action_type_detected = "update_goal"
+            field = "monthly_income" if ("income" in msg_lower or "salary" in msg_lower) else \
+                    "monthly_expenses" if "expense" in msg_lower else "savings_goal"
+            label = "Monthly Income" if field == "monthly_income" else \
+                    "Monthly Expenses" if field == "monthly_expenses" else "Savings Goal"
+            action_payload = {"field": field, "amount": amount_guess}
+            action_desc = f"Set {label} to ₹{amount_guess:,.0f}"
+
+        elif is_budget_action:
+            action_type_detected = "update_budget"
+            category_guess = "Other"
+            budget_cat_match = re.search(r'(?:my|the)\s+([A-Za-z]+)\s+budget', msg, re.IGNORECASE)
+            if budget_cat_match:
+                category_guess = budget_cat_match.group(1).strip().title()
+            else:
+                for cat in ["Food", "Transport", "Shopping", "Entertainment", "Bills", "Healthcare", "Education"]:
+                    if cat.lower() in msg_lower:
+                        category_guess = cat
+                        break
+            action_payload = {
+                "category": category_guess,
+                "amount": amount_guess
+            }
+            action_desc = f"Set {category_guess} budget to ₹{amount_guess:,.0f}"
+
+        else:
+            action_type_detected = "add_transaction"
+            tx_type = "expense"
+            merchant_guess = "Unknown"
+            category_guess = "Other"
+
+            # Detect income vs expense
+            income_signals = ["salary", "income", "received", "earned", "got paid", "credited", "inflow", "retainer"]
+            if any(s in msg_lower for s in income_signals):
+                tx_type = "income"
+                category_guess = "Income"
+
+            # Extract merchant from common patterns: "add a ₹500 Swiggy expense" or "record Zomato ₹300"
+            merchant_match = re.search(
+                r'(?:add|record|log|spent at|paid to|from)\s+(?:a|an|₹\d+\s+)?([A-Za-z][A-Za-z0-9 \-&\']+?)(?:\s+(?:expense|income|transaction|for|of|₹|\d)|\s*$)',
+                msg, re.IGNORECASE
+            )
+            if merchant_match:
+                merchant_guess = merchant_match.group(1).strip().title()
+
+            # Auto-categorize based on merchant
+            if merchant_guess and merchant_guess != "Unknown":
+                cat_result = ai_categorize_endpoint({"merchant": merchant_guess})
+                category_guess = cat_result.get("category", "Other")
+                if tx_type == "income":
+                    category_guess = "Income"
+
+            # Determine account from context
+            first_account = (data.get("accounts") or [{}])[0].get("name", "Primary Checking")
+
+            action_payload = {
+                "merchant": merchant_guess,
+                "amount": amount_guess,
+                "type": tx_type,
+                "category": category_guess,
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "account": first_account,
+                "notes": "Added via AI Assistant"
+            }
+            action_desc = f"Add {tx_type} transaction: {merchant_guess} — ₹{amount_guess:,.0f} ({category_guess})"
+
+        summary = f"AI-parsed action: {action_desc}."
+        understanding = (
+            f"I detected that you want to **{action_desc}**. "
+            f"Please confirm the details and click **Confirm & Apply** to update your financial records permanently."
+        )
+        why_it_matters = (
+            f"Keeping your balances and parameters up to date ensures your analytics, "
+            f"recommendations, and safety cushions reflect your exact current state."
+        )
+        forecast = (
+            f"• After confirmation, this update will be permanently saved to your financial profile and persist across refreshes."
+        )
+        msg_text = (
+            f"Ready to **{action_desc}**. Please review and confirm the action below:"
+        )
+
+        proposed_action_obj = ProposedAction(
+            type=action_type_detected,
+            description=action_desc,
+            amount=amount_guess,
+            why=f"User requested: \"{msg}\"",
+            expected_impact=f"Financial record will be permanently updated and saved.",
+            status="pending_confirmation",
+            payload=action_payload
+        )
+
+        return AIChatResponse(
+            message=msg_text,
+            intent=intent,
+            summary=summary,
+            understanding=understanding,
+            why_it_matters=why_it_matters,
+            forecast=forecast,
+            what_if=None,
+            recommendations=[],
+            recommendation="",
+            alerts=[],
+            action=proposed_action_obj,
+            requires_confirmation=True,
+            agent_contributions=[
+                AgentContribution(
+                    agent="Financial Analyzer (Agent 1)",
+                    stage="1",
+                    observation=f"Detected execute_action intent: {action_desc}"
+                )
+            ],
+            summarizer={},
+            raw_workflow_result={}
+        )
+
+    # 3. Prepare Context & Run Existing 3-Agent Foundry Workflow (for analytical queries)
     temp_data = json.loads(json.dumps(data))
     if detected_item or detected_amount:
         item_name = detected_item or "Planned Purchase"
@@ -1144,12 +1633,9 @@ def conversational_ai_chat(req: AIChatRequest):
             advice = f"It is recommended to postpone this purchase until your liquid reserves exceed scheduled obligations (₹{upcoming_bills:,.0f}) and essential monthly expenses."
 
         msg_text = (
-            f"Based on your current finances, purchasing the **{item_label}** for **₹{purchase_cost:,.0f}** "
-            f"{'is affordable with caution' if affordability.get('affordable', True) else 'poses high liquidity risk'}.\n\n"
-            f"• **Current Liquid Balance:** ₹{curr_bal:,.0f}\n"
-            f"• **Balance After Purchase:** ₹{curr_bal - purchase_cost:,.0f}\n"
-            f"• **Remaining Buffer After Upcoming Bills (₹{upcoming_bills:,.0f}):** ₹{curr_bal - purchase_cost - upcoming_bills:,.0f}\n\n"
-            f"{advice}"
+            f"**{item_label}** (₹{purchase_cost:,.0f}): {'✅ Affordable with caution.' if affordability.get('affordable', True) else '⚠️ High liquidity risk.'}\n"
+            f"• Balance after purchase: ₹{curr_bal - purchase_cost:,.0f} | Net after bills: ₹{curr_bal - purchase_cost - upcoming_bills:,.0f}\n"
+            f"• Monthly surplus: +₹{monthly_surplus:,.0f}/mo — buffer rebuilds in 30–60 days."
         )
 
     elif intent == "what_if_analysis":
@@ -1193,8 +1679,8 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• **Scenario Projection:** Estimated balance of **₹{proj_bal:,.0f}**."
         )
         msg_text = (
-            f"Here is your What-If scenario projection for **{scenario_name}**:\n"
-            f"{impact_text}"
+            f"**What-If:** {scenario_name}\n"
+            f"• {impact_text}"
         )
 
     elif intent == "spending_analysis":
@@ -1219,11 +1705,9 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• At current daily burn rate, discretionary expenses will utilize approximately 82% of allocated category limits by month-end."
         )
         msg_text = (
-            f"Your primary spending this month is concentrated in {top_cat_str}.\n\n"
-            f"• **Total Recorded Outflows:** ₹{monthly_expenses:,.0f} across {len(expense_txs)} transactions\n"
-            f"• **Monthly Income:** ₹{monthly_income:,.0f}\n"
-            f"• **Estimated Monthly Surplus:** +₹{monthly_surplus:,.0f}/mo\n\n"
-            f"Discretionary spending is pacing slightly high in shopping and dining. Keeping those under closer watch will preserve your monthly surplus for savings goals."
+            f"Top spending: {top_cat_str}.\n"
+            f"• Outflows: ₹{monthly_expenses:,.0f} across {len(expense_txs)} transactions | Surplus: +₹{monthly_surplus:,.0f}/mo\n"
+            f"• Watch discretionary categories to protect savings pace."
         )
 
     elif intent == "budget_analysis":
@@ -1244,11 +1728,9 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• If spending in warning categories continues at current pace, you will have approximately ₹{sum(b.get('remaining', 0) for b in warning):,.0f} remaining headroom."
         )
         msg_text = (
-            f"Here is your budget health check:\n\n"
-            f"• **Shopping:** 75% utilized (₹6,000 of ₹8,000 used)\n"
-            f"• **Food & Dining:** ₹5,650 remaining buffer\n"
-            f"• **Other Categories:** Well within limits\n\n"
-            f"Overall, you are within safe limits, but watch discretionary shopping closely for the rest of the cycle."
+            f"Budget status: {len(exceeded)} exceeded, {len(warning)} at warning threshold.\n"
+            f"• Shopping: 75% used (₹6,000 / ₹8,000) | Food: ₹5,650 remaining\n"
+            f"• Overall within limits — monitor discretionary spending this cycle."
         )
 
     elif intent == "bill_analysis":
@@ -1269,13 +1751,9 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• With upcoming bills reserved, your net available liquid buffer remains healthy at **₹{curr_bal - total_unpaid:,.0f}**."
         )
         msg_text = (
-            f"You have **{len(unpaid)} upcoming bills** totaling **₹{total_unpaid:,.0f}** due soon:\n\n"
-            f"• Rent: ₹15,000\n"
-            f"• Electricity: ₹2,500\n"
-            f"• Internet: ₹1,500\n"
-            f"• Mobile: ₹999\n\n"
-            f"After accounting for these, your available liquid reserve is **₹{curr_bal - total_unpaid:,.0f}**. "
-            f"It is recommended to keep these funds reserved to safeguard scheduled debits."
+            f"{len(unpaid)} bills due — ₹{total_unpaid:,.0f} total | {len(subs)} subscriptions (~₹{total_subs:,.0f}/mo).\n"
+            f"• Net liquid after reserving bills: ₹{curr_bal - total_unpaid:,.0f}\n"
+            f"• Keep these funds ring-fenced before any discretionary spend."
         )
 
     elif intent == "goal_analysis":
@@ -1296,11 +1774,9 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• In 90 Days: Projected savings balance of **₹{curr_savings + (monthly_surplus * 1.5):,.0f}**."
         )
         msg_text = (
-            f"You are making steady progress on your emergency fund!\n\n"
-            f"• **Current Savings:** ₹{curr_savings:,.0f} of ₹{savings_goal:,.0f} ({round((curr_savings / savings_goal) * 100)}% complete)\n"
-            f"• **Remaining Target:** ₹{gap:,.0f}\n"
-            f"• **Monthly Surplus:** +₹{monthly_surplus:,.0f}/mo\n"
-            f"• **Estimated Timeframe:** ~{months_away} months at current rate"
+            f"Emergency fund: ₹{curr_savings:,.0f} / ₹{savings_goal:,.0f} ({round((curr_savings / savings_goal) * 100)}% complete).\n"
+            f"• Gap: ₹{gap:,.0f} | Surplus: +₹{monthly_surplus:,.0f}/mo\n"
+            f"• On track to reach goal in ~{months_away} months."
         )
 
     elif intent == "alert_explanation":
@@ -1321,9 +1797,8 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• If shopping spending stops for this period, you will retain **₹2,000** remaining budget buffer and preserve your full savings pace."
         )
         msg_text = (
-            f"**Alert Explanation:** '{alert_title}'\n\n"
-            f"You have used 75% of your Shopping budget. "
-            f"To keep your finances balanced before upcoming bills are paid, it is recommended to cap further shopping at ₹2,000 for the remainder of this cycle."
+            f"**{alert_title}:** {alert_msg}\n"
+            f"• Cap discretionary shopping at ₹2,000 for the rest of this cycle to protect cash flow."
         )
 
     else:
@@ -1340,11 +1815,8 @@ def conversational_ai_chat(req: AIChatRequest):
             f"• Expected 60-day liquid position: **₹{curr_bal + (2 * monthly_surplus) - upcoming_bills:,.0f}**."
         )
         msg_text = (
-            f"Your current financial situation is stable.\n\n"
-            f"• **Liquid Balance:** ₹{curr_bal:,.0f}\n"
-            f"• **Monthly Surplus:** +₹{monthly_surplus:,.0f}/mo (Income: ₹{monthly_income:,.0f}, Expenses: ₹{monthly_expenses:,.0f})\n"
-            f"• **Upcoming Bills:** ₹{upcoming_bills:,.0f}\n\n"
-            f"You have sufficient liquidity to cover scheduled bills while preserving your emergency savings trajectory."
+            f"Balance: ₹{curr_bal:,.0f} | Surplus: +₹{monthly_surplus:,.0f}/mo | Bills due: ₹{upcoming_bills:,.0f}.\n"
+            f"• Liquidity is stable — sufficient to cover obligations and maintain savings pace."
         )
 
     # 5. Agent Contributions Attribution (4-Agent Pipeline)

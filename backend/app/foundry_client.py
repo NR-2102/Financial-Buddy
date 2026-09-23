@@ -366,7 +366,7 @@ class FoundryClient:
                 # Check consolidated report if no takeaways
                 consolidated = parsed.get("consolidated_report")
                 if isinstance(consolidated, dict) and not takeaways:
-                    for k, val in consolidated.items():
+                    for k, val in list(consolidated.items())[:2]:
                         if val and isinstance(val, str) and val.strip():
                             clean_v = val.strip().lstrip("•-* ").strip()
                             label = k.replace("_", " ").title()
@@ -377,9 +377,11 @@ class FoundryClient:
                 if isinstance(action_info, dict) and action_info.get("action_summary"):
                     act_text = action_info["action_summary"].strip().lstrip("•-* ").strip()
                     if act_text and act_text.lower() not in [str(t).lower() for t in takeaways]:
-                        bullet_list.append(f"• **Recommended Action:** {act_text}")
+                        bullet_list.append(f"• **Action:** {act_text}")
                 
-                formatted_msg = "\n\n".join(bullet_list) if bullet_list else format_as_bullet_points(str(parsed))
+                # Cap to 4 items total
+                bullet_list = bullet_list[:4]
+                formatted_msg = "\n".join(bullet_list) if bullet_list else format_as_bullet_points(str(parsed))
                 parsed["message"] = formatted_msg
                 parsed["executive_summary"] = formatted_msg
             elif "message" in parsed:
@@ -861,11 +863,12 @@ class FoundryClient:
             takeaways.append(f"Active Safeguards: {len(alerts)} active safety alert{'s' if len(alerts) > 1 else ''} being monitored.")
 
         exec_summary = (
-            f"**Overall Financial Health:** {health_score}. "
-            f"Your liquid balance is **₹{curr_bal:,.0f}** with an estimated monthly surplus of **+₹{surplus:,.0f}**. "
-            f"{('Discretionary purchase of ' + item_name + ' (₹' + f'{cost:,.0f}' + ') is feasible with existing cash reserves.' if is_affordable else 'Recommended to defer discretionary purchase of ' + item_name + ' until upcoming obligations are reserved.') if cost > 0 else 'Your overall cash flow supports ongoing emergency reserve building.'} "
-            f"Based on comprehensive cash flow analysis, budget utilization, and scheduled obligations."
+            f"{health_score}: ₹{curr_bal:,.0f} liquid, +₹{surplus:,.0f}/mo surplus. "
+            f"{('Purchase of ' + item_name + ' (₹' + f'{cost:,.0f}' + ') is feasible.' if is_affordable else 'Defer ' + item_name + ' purchase until obligations are reserved.') if cost > 0 else 'Cash flow supports ongoing reserve building.'}"
         )
+
+        # Cap takeaways to 3
+        takeaways = takeaways[:3]
 
         return {
             "agent": "financial_summarizer",
