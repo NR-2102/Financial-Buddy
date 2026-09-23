@@ -436,7 +436,7 @@ function renderPendingActionBannerHtml() {
         <div class="p-action-icon">🛡️</div>
         <div class="p-action-text">
           <h4>Agent 3 Action Pending Confirmation: ${action.type || 'Reserve Funds'}</h4>
-          <p>${action.description || `Simulated reservation of ${c}${formatNumber(action.amount || 19999)} to safeguard upcoming obligations.`}</p>
+          <p>${action.description || (action.amount ? `Simulated reservation of ${c}${formatNumber(action.amount)} to safeguard upcoming obligations.` : 'Simulated fund reservation.')}</p>
         </div>
       </div>
       <div class="p-action-buttons">
@@ -454,7 +454,7 @@ function openActionConfirmModal() {
 
   document.getElementById('modal-action-title').textContent = 'Confirm Simulated Action';
   document.getElementById('modal-action-type').textContent = action.type || 'reserve_bill_funds';
-  document.getElementById('modal-action-amount').textContent = `${c}${formatNumber(action.amount || 19999)}`;
+  document.getElementById('modal-action-amount').textContent = action.amount ? `${c}${formatNumber(action.amount)}` : 'N/A';
   document.getElementById('modal-action-description').textContent =
     action.description || 'Agent 3 has prepared a simulated fund reservation to safeguard upcoming obligations.';
 
@@ -465,7 +465,7 @@ async function handleExecuteActionDecision(confirmed, actionParam = null) {
   closeModal('modal-action-confirm');
   const action = actionParam || state.pending_action || {
     type: 'reserve_bill_funds',
-    amount: 19999,
+    amount: 0,
     description: 'Reserve funds for upcoming bills'
   };
 
@@ -509,7 +509,7 @@ async function handleExecuteActionDecision(confirmed, actionParam = null) {
         body: JSON.stringify({
           action_type: action.type || 'reserve_bill_funds',
           confirmed: true,
-          amount: action.amount || 19999,
+          amount: action.amount || 0,
           description: action.description
         })
       });

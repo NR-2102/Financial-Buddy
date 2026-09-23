@@ -1276,8 +1276,8 @@ def conversational_ai_chat(req: AIChatRequest):
             "to my balance", "to balance", "from my balance", "from balance",
             "add to balance", "add to my balance", "add to account", "add 5000", "add ₹",
             "set balance", "update balance", "change balance",
-            "set savings", "update savings", "my savings", "emergency fund",
-            "set goal", "update goal", "my goal", "savings goal",
+            "set savings", "update savings",
+            "set goal", "update goal",
             "set income", "update income",
             "set expenses", "update expenses"
         ]
@@ -1286,7 +1286,7 @@ def conversational_ai_chat(req: AIChatRequest):
             (("balance" in msg_lower or "account" in msg_lower) and any(w in msg_lower for w in ["add", "deposit", "set", "update", "change", "increase", "decrease", "subtract", "deduct", "remove", "put", "top up"]))
         )
         is_savings_action = (
-            ("saving" in msg_lower or "emergency fund" in msg_lower) and
+            ("saving" in msg_lower) and
             any(w in msg_lower for w in ["set", "update", "change", "add", "increase", "decrease", "make", "put", "deposit"])
         )
         # IMPORTANT: A read-only question such as "What is my income?"
@@ -1316,22 +1316,40 @@ def conversational_ai_chat(req: AIChatRequest):
             )
         )
 
-        if any(kw in msg_lower for kw in execute_keywords) or is_balance_action or is_savings_action or is_goal_action:
+        is_write_syntax = bool(re.search(r'^(?:add|record|log|insert)\s+(?:₹|rs\.?|inr|\d)', msg_lower))
+
+        # Fast-Path Safety Guard: common read-only questions must never be converted into financial write actions.
+        read_only_patterns = [
+            r"^what(?:'s| is)\s+my\s+(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
+            r"^tell me\s+(?:my\s+)?(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
+            r"^how much\s+(?:is|are)\s+my\s+(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
+            r"^how much\s+do\s+i\s+(?:earn|make|spend)\s*\??$",
+            r"^(?:is|are)\s+my\s+(?:emergency fund|savings)\s+(?:enough|sufficient|good|ok)\s*\??$",
+            r"^(?:am i|are we)\s+on track\b",
+            r"^can i\s+(?:afford|spend|buy)\b"
+        ]
+        is_explicit_read_only = any(re.search(p, msg_lower) for p in read_only_patterns)
+
+        if not is_explicit_read_only and (any(kw in msg_lower for kw in execute_keywords) or is_balance_action or is_savings_action or is_goal_action or is_write_syntax):
             intent = "execute_action"
         elif req.alert_context or any(w in msg_lower for w in ["alert", "warning", "why did i get", "explain this alert"]):
             intent = "alert_explanation"
-        elif any(w in msg_lower for w in ["what if", "what happens if", "next month", "spend more", "save less", "less next month"]):
-            intent = "what_if_analysis"
+        elif any(w in msg_lower for w in ["why am i spending more", "why did my spending increase", "spending increase", "more this month", "spending higher", "spending more"]):
+            intent = "spending_comparison"
         elif any(w in msg_lower for w in ["afford", "can i buy", "should i buy", "buy a", "buy the", "purchase"]):
             intent = "affordability_analysis"
-        elif any(w in msg_lower for w in ["spending", "spend the most", "where am i spending", "spent on", "shopping spending", "more this month"]):
-            intent = "spending_analysis"
+        elif any(w in msg_lower for w in ["what if", "what happens if", "next month", "save less", "less next month"]):
+            intent = "what_if_analysis"
+        elif any(w in msg_lower for w in ["biggest expense", "spend the most", "largest expense", "top expense", "where does my money go", "where am i spending", "biggest expenses"]):
+            intent = "biggest_expenses"
+        elif any(w in msg_lower for w in ["bill", "bills coming", "due", "owe", "recurring", "subscription", "bills are due", "due soon"]):
+            intent = "bill_analysis"
+        elif any(w in msg_lower for w in ["emergency fund", "savings goal", "on track", "how much more to save", "reach my", "is my emergency fund"]):
+            intent = "goal_analysis"
+        elif any(cat in msg_lower for cat in ["food", "shopping", "transport", "entertainment", "bills", "healthcare", "education"]) or any(w in msg_lower for w in ["spent on", "spending on", "how much did i spend", "spend on", "spend more on it", "more on it", "can i spend"]):
+            intent = "category_spending"
         elif any(w in msg_lower for w in ["budget", "within budget", "overspending", "budget limit", "left in my"]):
             intent = "budget_analysis"
-        elif any(w in msg_lower for w in ["bill", "bills coming", "due", "owe", "recurring", "subscription"]):
-            intent = "bill_analysis"
-        elif any(w in msg_lower for w in ["emergency fund", "goal", "on track", "how much more to save", "reach my"]):
-            intent = "goal_analysis"
         elif any(w in msg_lower for w in ["situation", "overview", "how am i doing", "summary", "financial state"]):
             intent = "financial_overview"
         else:
@@ -1339,18 +1357,6 @@ def conversational_ai_chat(req: AIChatRequest):
 
     # Fast-Path for Direct Action Intents (add transaction, update balance, savings, goal, budget)
     # Responds immediately without running analytical pipeline.
-    #
-    # Safety guard: common read-only questions must never be converted into
-    # financial write actions.
-    read_only_patterns = [
-        r"^what(?:'s| is)\s+my\s+(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
-        r"^tell me\s+(?:my\s+)?(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
-        r"^how much\s+(?:is|are)\s+my\s+(?:income|monthly income|salary|balance|savings|expenses?)\s*\??$",
-        r"^how much\s+do\s+i\s+(?:earn|make)\s*\??$"
-    ]
-    if intent == "execute_action" and any(re.search(p, msg_lower) for p in read_only_patterns):
-        intent = "general"
-
     if intent == "execute_action":
         amount_guess = detected_amount or 0.0
         if not amount_guess or amount_guess == 0.0:
@@ -1510,6 +1516,14 @@ def conversational_ai_chat(req: AIChatRequest):
                 if tx_type == "income":
                     category_guess = "Income"
 
+            # Direct category detection from phrasing like 'for food', 'on shopping'
+            for cat in ["Food", "Shopping", "Transport", "Entertainment", "Bills", "Healthcare", "Education", "Groceries"]:
+                if f"for {cat.lower()}" in msg_lower or f"on {cat.lower()}" in msg_lower or f"in {cat.lower()}" in msg_lower or cat.lower() in msg_lower.split():
+                    category_guess = "Food" if cat == "Groceries" else cat
+                    if merchant_guess == "Unknown":
+                        merchant_guess = f"{category_guess} Expense"
+                    break
+
             # Determine account from context
             first_account = (data.get("accounts") or [{}])[0].get("name", "Primary Checking")
 
@@ -1574,88 +1588,67 @@ def conversational_ai_chat(req: AIChatRequest):
             raw_workflow_result={}
         )
 
-    # 3. Prepare Context & Run Existing 3-Agent Foundry Workflow (for analytical queries)
+    # 3. Prepare Context & Run 4-Agent Pipeline
     temp_data = json.loads(json.dumps(data))
     if detected_item or detected_amount:
         item_name = detected_item or "Planned Purchase"
-        item_amt = detected_amount or 50000.0
+        item_amt = detected_amount or 0.0
         temp_data["profile"]["planned_purchase"] = {
             "item": item_name,
             "amount": item_amt
         }
 
-    workflow_res = foundry_client.run_pipeline(temp_data, user_query=msg)
+    workflow_res = foundry_client.run_pipeline(temp_data, user_query=msg, intent=intent, conversation=conv)
     analyzer = workflow_res.get("analyzer", {})
     planner = workflow_res.get("planner", {})
     alert_action = workflow_res.get("alert_action", {})
+    summarizer = workflow_res.get("summarizer", {})
 
-    # Compute baseline financial metrics
+    # Compute baseline financial metrics from actual context without hardcoded defaults
     profile = temp_data.get("profile", {})
     accounts = temp_data.get("accounts", [])
-    curr_bal = sum(float(a.get("balance", 0)) for a in accounts) if accounts else float(profile.get("current_balance", 120000))
-    monthly_income = float(profile.get("monthly_income", 60000))
-    monthly_expenses = float(profile.get("monthly_expenses", 28500))
+    curr_bal = sum(float(a.get("balance", 0)) for a in accounts if a.get("type") != "Credit Card") if accounts else float(profile.get("current_balance", 0.0))
+    monthly_income = float(profile.get("monthly_income", 0.0))
+    monthly_expenses = float(profile.get("monthly_expenses", 0.0))
+    if monthly_income <= 0:
+        income_txs = [t for t in temp_data.get("transactions", []) if t.get("type") == "income"]
+        if income_txs:
+            monthly_income = sum(float(t.get("amount", 0)) for t in income_txs)
+    if monthly_expenses <= 0:
+        expense_txs = [t for t in temp_data.get("transactions", []) if t.get("type") != "income"]
+        if expense_txs:
+            monthly_expenses = sum(float(t.get("amount", 0)) for t in expense_txs)
     monthly_surplus = max(0.0, monthly_income - monthly_expenses)
-    curr_savings = float(profile.get("current_savings", 80000))
-    savings_goal = float(profile.get("savings_goal", 200000))
+    curr_savings = float(profile.get("current_savings", 0.0))
+    savings_goal = float(profile.get("savings_goal", 0.0))
     bills_list = temp_data.get("bills", [])
-    upcoming_bills = sum(float(b.get("amount", 0)) for b in bills_list if b.get("status") != "paid") if bills_list else float(profile.get("upcoming_bills", 19999))
+    unpaid_bills = [b for b in bills_list if b.get("status") != "paid"]
+    upcoming_bills = sum(float(b.get("amount", 0)) for b in unpaid_bills) if bills_list else float(profile.get("upcoming_bills", 0.0))
 
     cash_flow = planner.get("cash_flow", {})
     affordability = planner.get("affordability_analysis", {})
-    purchase_cost = float(affordability.get("cost", detected_amount or 50000.0))
+    purchase_cost = float(affordability.get("cost", detected_amount or 0.0))
     item_label = affordability.get("item", detected_item or "Item")
 
-    # 4. Construct Specialized Reasoning for Query Types
+    # 4. What-If Comparison for scenario queries
     what_if = None
-
-    if intent == "affordability_analysis":
-        summary = f"Affordability analysis for {item_label} (₹{purchase_cost:,.0f})."
-        understanding = (
-            f"You inquired about purchasing **{item_label}** for **₹{purchase_cost:,.0f}**. "
-            f"Your current liquid balance is **₹{curr_bal:,.0f}**, with **₹{upcoming_bills:,.0f}** in upcoming bills "
-            f"and an active monthly surplus of **+₹{monthly_surplus:,.0f}/mo**."
-        )
-        why_it_matters = affordability.get("verdict", (
-            f"Reserving funds for upcoming bills (₹{upcoming_bills:,.0f}) is essential so that this purchase does not "
-            f"deplete your living expense buffer."
-        ))
-        fc_after = cash_flow.get("forecast_30_days_after", curr_bal - purchase_cost + monthly_surplus - upcoming_bills)
-        fc_before = cash_flow.get("forecast_30_days_before", curr_bal + monthly_surplus - upcoming_bills)
-        forecast = (
-            f"• **30-Day Liquid Balance Post-Purchase:** Projected at **₹{fc_after:,.0f}** (vs **₹{fc_before:,.0f}** without purchase).\n"
-            f"• **60-Day Recovery Outlook:** Liquid buffer estimated to rebuild to **₹{cash_flow.get('forecast_60_days_after', fc_after + monthly_surplus):,.0f}**.\n"
-            f"• **90-Day Outlook:** Estimated balance of **₹{cash_flow.get('forecast_90_days_after', fc_after + (2 * monthly_surplus)):,.0f}**."
-        )
-        if affordability.get('affordable', True):
-            advice = f"Setting aside **₹{upcoming_bills:,.0f}** for your upcoming bills is recommended. With your monthly surplus of **+₹{monthly_surplus:,.0f}/mo**, your liquid reserves are projected to recover within 30 to 60 days."
-        else:
-            advice = f"It is recommended to postpone this purchase until your liquid reserves exceed scheduled obligations (₹{upcoming_bills:,.0f}) and essential monthly expenses."
-
-        msg_text = (
-            f"**{item_label}** (₹{purchase_cost:,.0f}): {'✅ Affordable with caution.' if affordability.get('affordable', True) else '⚠️ High liquidity risk.'}\n"
-            f"• Balance after purchase: ₹{curr_bal - purchase_cost:,.0f} | Net after bills: ₹{curr_bal - purchase_cost - upcoming_bills:,.0f}\n"
-            f"• Monthly surplus: +₹{monthly_surplus:,.0f}/mo — buffer rebuilds in 30–60 days."
-        )
-
-    elif intent == "what_if_analysis":
+    if intent == "what_if_analysis":
         is_next_month = "next month" in msg_lower
-        extra_spend = 10000.0 if "10,000" in msg or "10000" in msg else (detected_amount or 10000.0)
-        
+        extra_spend = detected_amount or 10000.0
         if is_next_month:
-            scenario_name = f"Purchase {item_label} (₹{purchase_cost:,.0f}) Next Month"
+            scenario_name = f"Purchase {item_label} (₹{purchase_cost:,.0f}) Next Month" if purchase_cost > 0 else f"Delay Purchase to Next Month"
             proj_bal = curr_bal + monthly_surplus - upcoming_bills - purchase_cost
             impact_text = (
                 f"Waiting until next month allows you to accumulate another month of surplus (+₹{monthly_surplus:,.0f}), "
-                f"settle upcoming bills (₹{upcoming_bills:,.0f}), and leaves your balance ₹{monthly_surplus - upcoming_bills:,.0f} higher "
+                f"settle upcoming bills (₹{upcoming_bills:,.0f}), and leaves your net cushion ₹{monthly_surplus:,.0f} higher "
                 f"compared to buying immediately."
             )
         else:
-            scenario_name = f"Additional Discretionary Outflow of ₹{extra_spend:,.0f}"
+            scenario_name = f"Additional Outflow of ₹{extra_spend:,.0f}"
             proj_bal = max(0.0, curr_bal - extra_spend)
             impact_text = (
                 f"An extra expenditure of ₹{extra_spend:,.0f} reduces your monthly surplus from +₹{monthly_surplus:,.0f} "
-                f"to +₹{max(0.0, monthly_surplus - extra_spend):,.0f}, extending your emergency fund goal completion by ~1 month."
+                f"to +₹{max(0.0, monthly_surplus - extra_spend):,.0f}."
             )
 
         what_if = WhatIfComparison(
@@ -1663,177 +1656,18 @@ def conversational_ai_chat(req: AIChatRequest):
             current_balance=curr_bal,
             projected_balance=proj_bal,
             current_savings=curr_savings,
-            projected_savings=curr_savings if not is_next_month else curr_savings + 10000.0,
+            projected_savings=curr_savings,
             impact_summary=impact_text
         )
-        summary = f"What-If scenario projection: {scenario_name}."
-        understanding = (
-            f"Modeling hypothetical financial scenario: **{scenario_name}**. "
-            f"Evaluating impact on current balance (₹{curr_bal:,.0f}), monthly surplus (₹{monthly_surplus:,.0f}), and goal timeline."
-        )
-        why_it_matters = (
-            f"Simulating timing and spending changes helps distinguish discretionary trade-offs without risking real financial commitments."
-        )
-        forecast = (
-            f"• **Current Trajectory (No Change):** Projected 30-day balance of **₹{cash_flow.get('forecast_30_days_before', curr_bal + monthly_surplus - upcoming_bills):,.0f}**.\n"
-            f"• **Scenario Projection:** Estimated balance of **₹{proj_bal:,.0f}**."
-        )
-        msg_text = (
-            f"**What-If:** {scenario_name}\n"
-            f"• {impact_text}"
-        )
 
-    elif intent == "spending_analysis":
-        txs = temp_data.get("transactions", [])
-        expense_txs = [t for t in txs if t.get("type") != "income"]
-        cat_spending = {}
-        for t in expense_txs:
-            c = t.get("category", "Other")
-            cat_spending[c] = cat_spending.get(c, 0.0) + float(t.get("amount", 0))
-        sorted_cats = sorted(cat_spending.items(), key=lambda x: x[1], reverse=True)
-        top_cat_str = ", ".join([f"**{cat}** (₹{amt:,.0f})" for cat, amt in sorted_cats[:3]]) if sorted_cats else "General"
-
-        summary = "Spending pattern audit."
-        understanding = (
-            f"Review of your transaction stream: Total recorded outflows are **₹{monthly_expenses:,.0f}** across "
-            f"**{len(expense_txs)} transactions**. Highest spending categories: {top_cat_str}."
-        )
-        why_it_matters = (
-            f"Discretionary categories (Shopping & Dining) account for the highest pace of budget depletion this month."
-        )
-        forecast = (
-            f"• At current daily burn rate, discretionary expenses will utilize approximately 82% of allocated category limits by month-end."
-        )
-        msg_text = (
-            f"Top spending: {top_cat_str}.\n"
-            f"• Outflows: ₹{monthly_expenses:,.0f} across {len(expense_txs)} transactions | Surplus: +₹{monthly_surplus:,.0f}/mo\n"
-            f"• Watch discretionary categories to protect savings pace."
-        )
-
-    elif intent == "budget_analysis":
-        budgets_analysis = analyzer.get("budget_analysis", [])
-        exceeded = [b for b in budgets_analysis if b.get("percentage_used", 0) >= 100]
-        warning = [b for b in budgets_analysis if 75 <= b.get("percentage_used", 0) < 100]
-
-        summary = "Monthly budget utilization analysis."
-        understanding = (
-            f"Active budget tracking: You have **{len(budgets_analysis)} active budgets**. "
-            f"{f'{len(exceeded)} category exceeded, ' if exceeded else ''}{len(warning)} category approaching limit."
-        )
-        why_it_matters = (
-            f"Exceeding category budgets directly consumes from your net monthly surplus (+₹{monthly_surplus:,.0f}), "
-            f"slowing your emergency fund build rate."
-        )
-        forecast = (
-            f"• If spending in warning categories continues at current pace, you will have approximately ₹{sum(b.get('remaining', 0) for b in warning):,.0f} remaining headroom."
-        )
-        msg_text = (
-            f"Budget status: {len(exceeded)} exceeded, {len(warning)} at warning threshold.\n"
-            f"• Shopping: 75% used (₹6,000 / ₹8,000) | Food: ₹5,650 remaining\n"
-            f"• Overall within limits — monitor discretionary spending this cycle."
-        )
-
-    elif intent == "bill_analysis":
-        unpaid = [b for b in bills_list if b.get("status") != "paid"]
-        subs = temp_data.get("subscriptions", [])
-        total_unpaid = sum(float(b.get("amount", 0)) for b in unpaid)
-        total_subs = sum(float(s.get("amount", 0)) for s in subs)
-
-        summary = f"Obligations audit: {len(unpaid)} upcoming bills and {len(subs)} recurring subscriptions."
-        understanding = (
-            f"You have **{len(unpaid)} upcoming bills** totaling **₹{total_unpaid:,.0f}** requiring liquidity reservation, "
-            f"along with **{len(subs)} recurring subscriptions** (~₹{total_subs:,.0f}/mo)."
-        )
-        why_it_matters = (
-            f"Ensuring ₹{total_unpaid:,.0f} is safeguarded before discretionary spending prevents overdraft or bill delinquency."
-        )
-        forecast = (
-            f"• With upcoming bills reserved, your net available liquid buffer remains healthy at **₹{curr_bal - total_unpaid:,.0f}**."
-        )
-        msg_text = (
-            f"{len(unpaid)} bills due — ₹{total_unpaid:,.0f} total | {len(subs)} subscriptions (~₹{total_subs:,.0f}/mo).\n"
-            f"• Net liquid after reserving bills: ₹{curr_bal - total_unpaid:,.0f}\n"
-            f"• Keep these funds ring-fenced before any discretionary spend."
-        )
-
-    elif intent == "goal_analysis":
-        goals = planner.get("goal_analysis", [])
-        gap = max(0.0, savings_goal - curr_savings)
-        months_away = round(gap / monthly_surplus, 1) if monthly_surplus > 0 else 999.0
-
-        summary = f"Emergency Fund progress is at {round((curr_savings / savings_goal) * 100)}%."
-        understanding = (
-            f"Goal tracking status: Your Emergency Savings Goal is **₹{curr_savings:,.0f} / ₹{savings_goal:,.0f}** "
-            f"({round((curr_savings / savings_goal) * 100)}% complete). Remaining shortfall is **₹{gap:,.0f}**."
-        )
-        why_it_matters = (
-            f"At your current monthly surplus (+₹{monthly_surplus:,.0f}/mo), you are on track to achieve full emergency funding in approximately **{months_away} months**."
-        )
-        forecast = (
-            f"• In 30 Days: Projected savings balance of **₹{curr_savings + (monthly_surplus * 0.5):,.0f}**.\n"
-            f"• In 90 Days: Projected savings balance of **₹{curr_savings + (monthly_surplus * 1.5):,.0f}**."
-        )
-        msg_text = (
-            f"Emergency fund: ₹{curr_savings:,.0f} / ₹{savings_goal:,.0f} ({round((curr_savings / savings_goal) * 100)}% complete).\n"
-            f"• Gap: ₹{gap:,.0f} | Surplus: +₹{monthly_surplus:,.0f}/mo\n"
-            f"• On track to reach goal in ~{months_away} months."
-        )
-
-    elif intent == "alert_explanation":
-        alert_info = req.alert_context or {}
-        alert_title = alert_info.get("title") or "Shopping Budget Warning"
-        alert_msg = alert_info.get("message") or "Shopping budget utilized at 75% limit threshold."
-
-        summary = f"Contextual explanation of alert: '{alert_title}'."
-        understanding = (
-            f"This alert was generated because: **{alert_msg}**. "
-            f"Recent purchases at Amazon (₹4,500) and Bookstores (₹1,500) accelerated budget pace."
-        )
-        why_it_matters = (
-            f"Approaching the budget limit with upcoming bills due (₹{upcoming_bills:,.0f}) means further shopping could "
-            f"reduce your monthly surplus below the planned ₹30,000 target."
-        )
-        forecast = (
-            f"• If shopping spending stops for this period, you will retain **₹2,000** remaining budget buffer and preserve your full savings pace."
-        )
-        msg_text = (
-            f"**{alert_title}:** {alert_msg}\n"
-            f"• Cap discretionary shopping at ₹2,000 for the rest of this cycle to protect cash flow."
-        )
-
-    else:
-        summary = "Consolidated financial state review."
-        understanding = (
-            f"Financial overview: Total liquid balance is **₹{curr_bal:,.0f}**, monthly income is **₹{monthly_income:,.0f}**, "
-            f"monthly living expenses are **₹{monthly_expenses:,.0f}**, and upcoming bills are **₹{upcoming_bills:,.0f}**."
-        )
-        why_it_matters = (
-            f"You maintain a positive monthly surplus of **+₹{monthly_surplus:,.0f}/mo**, placing you in a healthy financial position."
-        )
-        forecast = (
-            f"• Expected 30-day liquid position: **₹{curr_bal + monthly_surplus - upcoming_bills:,.0f}**.\n"
-            f"• Expected 60-day liquid position: **₹{curr_bal + (2 * monthly_surplus) - upcoming_bills:,.0f}**."
-        )
-        msg_text = (
-            f"Balance: ₹{curr_bal:,.0f} | Surplus: +₹{monthly_surplus:,.0f}/mo | Bills due: ₹{upcoming_bills:,.0f}.\n"
-            f"• Liquidity is stable — sufficient to cover obligations and maintain savings pace."
-        )
-
-    # 5. Agent Contributions Attribution (4-Agent Pipeline)
-    summarizer = workflow_res.get("summarizer", {})
+    # 5. Agent 4 Synthesized Conversational Message (Natural Language First)
+    msg_text = summarizer.get("message") or summarizer.get("executive_summary") or workflow_res.get("message") or "Analysis complete."
+    exec_summary_text = summarizer.get("executive_summary") or msg_text
     health_status = summarizer.get("health_score", "Healthy & Stable")
-    live_text = (
-        summarizer.get("executive_summary")
-        or summarizer.get("message")
-        or workflow_res.get("message")
-    )
-    if live_text and workflow_res.get("execution_mode") in ["foundry_agent", "foundry_workflow_agent", "foundry_live_chain"]:
-        msg_text = format_as_bullet_points(live_text)
-        exec_summary_text = msg_text
-    else:
-        msg_text = format_as_bullet_points(msg_text)
-        summarizer["executive_summary"] = msg_text
-        exec_summary_text = msg_text
+
+    understanding = msg_text
+    why_it_matters = summarizer.get("insight") or f"Active monthly surplus (+₹{monthly_surplus:,.0f}/mo) maintains financial stability."
+    forecast = f"• Expected 30-day liquid position: ₹{curr_bal + monthly_surplus - upcoming_bills:,.0f}.\n• Net buffer after scheduled bills: ₹{curr_bal - upcoming_bills:,.0f}."
 
     agent_contributions = [
         AgentContribution(
@@ -1844,60 +1678,61 @@ def conversational_ai_chat(req: AIChatRequest):
         AgentContribution(
             agent="Financial Planner (Agent 2)",
             stage="2",
-            observation=f"Modeled 30/60/90-day cash flow (surplus +₹{monthly_surplus:,.0f}/mo); evaluated affordability for {item_label} (₹{purchase_cost:,.0f}); calculated goal gap (₹{max(0.0, savings_goal - curr_savings):,.0f})."
+            observation=f"Modeled cash flow (surplus +₹{monthly_surplus:,.0f}/mo); evaluated affordability for {item_label} (₹{purchase_cost:,.0f}); goal gap ₹{max(0.0, savings_goal - curr_savings):,.0f}."
         ),
         AgentContribution(
             agent="Proactive Alerts & Action (Agent 3)",
             stage="3",
-            observation=f"Prepared simulated fund reservation; flagged {len(alert_action.get('alerts', []))} active warnings with human confirmation gating."
+            observation=f"Evaluated proactive safeguards ({len(alert_action.get('alerts', []))} alerts monitored); human confirmation gating."
         ),
         AgentContribution(
-            agent="Executive Summarizer (Agent 4)",
+            agent="Financial Summary Agent (Agent 4)",
             stage="4",
-            observation=f"Synthesized outputs across Analyzer, Planner, and Alert agents into unified guidance; rated financial health as '{health_status}'."
+            observation=f"Synthesized outputs across Analyzer, Planner, and Alert agents into conversational response; rated status as '{health_status}'."
         )
     ]
 
-    # 6. Action Proposal from Agent 3
+    # 6. Action Proposal from Agent 3 (Confirmation gating ONLY when required)
     action_obj = None
     req_confirm = False
     raw_action = alert_action.get("action")
     if alert_action.get("requires_confirmation") and raw_action:
         req_confirm = True
-        act_amt = float(raw_action.get("amount", upcoming_bills))
+        act_amt = float(raw_action.get("amount", 0.0))
         action_obj = ProposedAction(
             type=raw_action.get("type", "reserve_bill_funds"),
-            description=raw_action.get("description", f"Reserve ₹{act_amt:,.0f} from main balance to safeguard upcoming expenses."),
+            description=raw_action.get("description", "Requested financial action"),
             amount=act_amt,
-            why=f"Ensures ₹{act_amt:,.0f} is ring-fenced for mandatory obligations so discretionary expenditures do not trigger liquidity deficits.",
-            expected_impact=f"Simulates reserving ₹{act_amt:,.0f}, adjusting liquid balance from ₹{curr_bal:,.0f} to ₹{curr_bal - act_amt:,.0f} in prototype state.",
-            status="pending_confirmation"
+            why=raw_action.get("why") or "User requested financial operation requiring human confirmation.",
+            expected_impact=raw_action.get("expected_impact") or "Updates financial records upon confirmation.",
+            status="pending_confirmation",
+            payload=raw_action.get("payload")
         )
 
-    # 7. Recommendations
+    # 7. Recommendations: strictly from Planner, NO fake recommendations
     rec_list = planner.get("recommendations", [])
-    if not rec_list:
-        rec_list = [
-            f"Maintain at least 2 months living expenses (₹{monthly_expenses * 2:,.0f}) in your liquid reserve buffer.",
-            f"Reserve ₹{upcoming_bills:,.0f} for upcoming bills prior to purchasing {item_label}."
-        ]
 
     return AIChatResponse(
         message=msg_text,
-        intent=intent,
+        intent=intent or summarizer.get("response_type", "general"),
         summary=exec_summary_text,
         understanding=understanding,
         why_it_matters=why_it_matters,
         forecast=forecast,
         what_if=what_if,
         recommendations=rec_list,
-        recommendation=" ".join([f"• {r}" for r in rec_list]),
+        recommendation=" ".join([f"• {r}" for r in rec_list]) if rec_list else "",
         alerts=alert_action.get("alerts", []),
         action=action_obj,
         requires_confirmation=req_confirm,
         agent_contributions=agent_contributions,
         summarizer=summarizer,
-        raw_workflow_result=workflow_res
+        raw_workflow_result=workflow_res,
+        response_type=summarizer.get("response_type", "information"),
+        insight=summarizer.get("insight"),
+        warning=summarizer.get("warning"),
+        follow_up=summarizer.get("follow_up"),
+        data_status=summarizer.get("data_status", "available")
     )
 
 # -------------------------------------------------------------

@@ -27,42 +27,54 @@ function formatMarkdownSnippet(text) {
     text = String(text);
   }
 
+  const formatInline = (str) => {
+    return escapeHtml(str)
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>');
+  };
+
   const rawLines = text.split('\n');
-  const bulletItems = [];
+  const elements = [];
+  let currentBullets = [];
+
+  const flushBullets = () => {
+    if (currentBullets.length > 0) {
+      elements.push(`<div class="ai-bullet-list">${currentBullets.join('')}</div>`);
+      currentBullets = [];
+    }
+  };
 
   for (let rawLine of rawLines) {
     let line = rawLine.trim();
-    if (!line) continue;
+    if (!line) {
+      flushBullets();
+      continue;
+    }
 
-    // Handle lines that may contain multiple bullets e.g. "• Point 1 • Point 2"
-    const subBullets = line.split(/(?=[•\-\*]\s+)/);
-    for (let sub of subBullets) {
-      let trimmed = sub.trim();
-      if (!trimmed) continue;
+    const isBullet = /^[•\-\*]\s+/.test(line) || /^\d+[\.\)]\s+/.test(line);
 
-      // Clean leading bullet symbol or numeric counter
-      let cleanContent = trimmed
+    if (isBullet) {
+      let cleanContent = line
         .replace(/^[•\-\*]\s*/, '')
         .replace(/^\d+[\.\)]\s*/, '')
         .trim();
-      if (!cleanContent) continue;
-
-      // Apply markdown bold and italic
-      let formatted = escapeHtml(cleanContent)
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>');
-
-      bulletItems.push(`
-        <div class="ai-bullet-point">
-          <span class="ai-bullet-dot">•</span>
-          <span class="ai-bullet-text">${formatted}</span>
-        </div>
-      `);
+      if (cleanContent) {
+        currentBullets.push(`
+          <div class="ai-bullet-point">
+            <span class="ai-bullet-dot">•</span>
+            <span class="ai-bullet-text">${formatInline(cleanContent)}</span>
+          </div>
+        `);
+      }
+    } else {
+      flushBullets();
+      elements.push(`<p class="ai-paragraph">${formatInline(line)}</p>`);
     }
   }
 
-  if (bulletItems.length === 0) return '';
-  return `<div class="ai-bullet-list">${bulletItems.join('')}</div>`;
+  flushBullets();
+  return elements.join('');
 }
 
 function showToast(message, type = 'info', allowHtml = false) {

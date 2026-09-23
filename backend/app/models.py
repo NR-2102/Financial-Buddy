@@ -152,6 +152,11 @@ class AIChatResponse(BaseModel):
     agent_contributions: List[AgentContribution] = []
     summarizer: Optional[Dict[str, Any]] = None
     raw_workflow_result: Optional[Dict[str, Any]] = None
+    response_type: Optional[str] = "information"
+    insight: Optional[str] = None
+    warning: Optional[str] = None
+    follow_up: Optional[str] = None
+    data_status: Optional[str] = "available"
 
 class ExecuteActionRequest(BaseModel):
     action_type: str  # "add_transaction", "update_budget", "add_budget"

@@ -167,8 +167,10 @@ function renderChatMessageHtml(msg) {
 
   // Assistant response (synthesized from the multi-agent pipeline into a single direct answer)
   let answerHtml = '';
+  let insightHtml = '';
+  let warningHtml = '';
+  let followUpHtml = '';
   let actionHtml = '';
-  let recommendationHtml = '';
 
   if (msg.structured) {
     const s = msg.structured;
@@ -177,31 +179,52 @@ function renderChatMessageHtml(msg) {
 
     answerHtml = formatMarkdownSnippet(text);
 
-    // Red urgent recommendation alert (from s.recommendations array or s.recommendation string)
-    const recList = Array.isArray(s.recommendations) && s.recommendations.length > 0
-      ? s.recommendations
-      : (s.recommendation ? [s.recommendation] : []);
-    if (recList.length > 0) {
-      const recItems = recList.slice(0, 2).map(r => {
-        const clean = cleanAgentMentions(String(r)).replace(/^\u2022\s*/, '').trim();
-        return `<span class="chat-rec-item">⚠️ ${escapeHtml(clean)}</span>`;
-      }).join('');
-      recommendationHtml = `
-        <div class="chat-recommendation-alert">
-          <div class="chat-rec-header">
-            <span class="chat-rec-icon">🚨</span>
-            <span class="chat-rec-label">Action Required</span>
-          </div>
-          <div class="chat-rec-body">${recItems}</div>
+    // Subtle Insight Banner (when agent provides an educational or context insight)
+    if (s.insight) {
+      insightHtml = `
+        <div class="chat-insight-banner">
+          <span class="chat-insight-icon">💡</span>
+          <div class="chat-insight-text">${escapeHtml(cleanAgentMentions(s.insight))}</div>
         </div>
       `;
     }
 
-    // If an actionable recommendation is present (e.g. reserve upcoming bill funds or add transaction)
-    if (s.action) {
+    // Subtle Warning Banner (only when real risk/warning detected, not on routine queries)
+    if (s.warning) {
+      warningHtml = `
+        <div class="chat-warning-banner">
+          <span class="chat-warning-icon">⚠️</span>
+          <div class="chat-warning-text">${escapeHtml(cleanAgentMentions(s.warning))}</div>
+        </div>
+      `;
+    } else if (s.response_type === 'warning' && Array.isArray(s.recommendations) && s.recommendations.length > 0) {
+      const recItems = s.recommendations.slice(0, 2).map(r => {
+        const clean = cleanAgentMentions(String(r)).replace(/^\u2022\s*/, '').trim();
+        return `<span class="chat-rec-item">⚠️ ${escapeHtml(clean)}</span>`;
+      }).join('');
+      warningHtml = `
+        <div class="chat-warning-banner">
+          <span class="chat-warning-icon">⚠️</span>
+          <div class="chat-warning-text">${recItems}</div>
+        </div>
+      `;
+    }
+
+    // Follow-up suggestion hint
+    if (s.follow_up) {
+      followUpHtml = `
+        <div class="chat-followup-hint">
+          <span class="chat-followup-icon">💬</span>
+          <span class="chat-followup-text">${escapeHtml(cleanAgentMentions(s.follow_up))}</span>
+        </div>
+      `;
+    }
+
+    // Action Confirmation Card: ONLY when action exists AND requires_confirmation is true
+    if (s.action && (s.requires_confirmation === true || s.response_type === 'action_confirmation')) {
       const actionJsonStr = escapeHtml(JSON.stringify(s.action));
       const c = state.profile.currency || '₹';
-      const actionDesc = cleanAgentMentions(s.action.description || 'Reserve funds for scheduled obligations');
+      const actionDesc = cleanAgentMentions(s.action.description || 'Confirm action');
       const isExecuteAction = ['add_transaction', 'update_budget', 'add_budget', 'update_balance', 'update_savings', 'update_goal'].includes(s.action.type);
       const actionIcon = isExecuteAction
         ? (s.action.type === 'add_transaction' ? '➕'
@@ -237,8 +260,10 @@ function renderChatMessageHtml(msg) {
         <div class="chat-answer-content">
           ${answerHtml}
         </div>
-        ${recommendationHtml}
+        ${insightHtml}
+        ${warningHtml}
         ${actionHtml}
+        ${followUpHtml}
       </div>
     </div>
   `;
